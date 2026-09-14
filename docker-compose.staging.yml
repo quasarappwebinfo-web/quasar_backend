@@ -1,0 +1,51 @@
+name: quasar_backend_staging
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: quasar_backend_db_staging
+    restart: unless-stopped
+    command: --default-time-zone=-05:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "${DB_HOST_PORT}:3306"
+    volumes:
+      - db_data_staging:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - staging_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: quasar_backend_api_staging
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE}
+      ENVIRONMENT: staging
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT} --reload"
+    volumes:
+      - .:/app
+    networks:
+      - staging_network
+
+volumes:
+  db_data_staging:
+
+networks:
+  staging_network:
+    driver: bridge

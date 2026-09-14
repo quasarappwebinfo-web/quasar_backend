@@ -1,0 +1,20 @@
+from typing import Optional
+from pydantic import Field
+from app.schemas.base import BaseCreateSchema, BaseResponseSchema, BaseUpdateSchema
+
+class ObraStageCreate(BaseCreateSchema):
+    name: str = Field(..., min_length=1, max_length=150)
+    description: Optional[str] = None
+    display_order: int
+
+class ObraStageUpdate(BaseUpdateSchema):
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    description: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[int] = None
+
+class ObraStageResponse(BaseResponseSchema):
+    name: str
+    description: Optional[str] = None
+    display_order: int
+    is_active: int

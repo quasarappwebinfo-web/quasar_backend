@@ -1,0 +1,17 @@
+[project]
+name = "quasar-backend"
+version = "0.1.0"
+description = "Quasar Backend — FastAPI + MySQL"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+quasar-cli = "app.cli:cli"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
