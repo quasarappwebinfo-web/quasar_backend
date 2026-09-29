@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -18,6 +18,8 @@ class TaskTemplateSubtask(Base):
     description = Column(Text, nullable=True)
     display_order = Column(Integer, nullable=False)
     is_required = Column(Integer, default=1)
+    # % que esta subtarea aporta al 100% de la actividad (plantilla)
+    weight_percent = Column(Numeric(6, 2), nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     template_version = relationship("TaskTemplateVersion", back_populates="subtasks")

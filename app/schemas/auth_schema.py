@@ -28,7 +28,9 @@ class LoginResponse(BaseSchema):
     username: str
     name: str
     role_name: str
-
+    is_super: int = 0
+    has_full_access: bool = False
+    permissions: list[str] = Field(default_factory=list)
 
 class AccessTokenResponse(BaseSchema):
     access_token: str

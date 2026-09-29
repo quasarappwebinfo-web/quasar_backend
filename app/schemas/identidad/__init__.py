@@ -11,8 +11,11 @@ from app.schemas.identidad.user_role_schema import (
 from app.schemas.identidad.user_schema import (
     UserCreate,
     UserUpdate,
+    UserStatusUpdate,
+    ChangePasswordRequest,
     UserResponse,
     UserInDB,
+    PermissionCatalogItem,
 )
 
 __all__ = [
@@ -24,6 +27,9 @@ __all__ = [
     "UserRoleResponse",
     "UserCreate",
     "UserUpdate",
+    "UserStatusUpdate",
+    "ChangePasswordRequest",
     "UserResponse",
     "UserInDB",
+    "PermissionCatalogItem",
 ]

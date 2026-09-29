@@ -34,9 +34,11 @@ El script te pide:
 
 Crea automáticamente:
 
-1. Rol `admin` (si no existe)  
+1. Roles de sistema (`super_admin`, `admin`, `supervisor`, `maestro`, `cliente`) si no existen  
 2. Persona  
-3. Usuario con rol admin y `is_super=1`
+3. Usuario dueño con rol `super_admin` y `is_super=1` (intocable)
+
+Ese usuario es el **dueño de la empresa**. Nadie lo puede desactivar ni cambiarle el rol por API.
 
 ## Sin Docker (local)
 

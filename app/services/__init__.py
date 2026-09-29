@@ -16,8 +16,16 @@ from app.services.user_service import (
     update_user,
     list_users,
     update_status_user,
-    list_active_roles,
+    change_password,
+    get_user,
     user_to_dict,
+)
+from app.services.role_service import list_active_roles
+from app.services.person_service import (
+    create_person,
+    get_person,
+    list_persons,
+    update_person,
 )
 
 __all__ = [
@@ -36,6 +44,12 @@ __all__ = [
     "update_user",
     "list_users",
     "update_status_user",
+    "change_password",
+    "get_user",
     "list_active_roles",
     "user_to_dict",
+    "create_person",
+    "get_person",
+    "list_persons",
+    "update_person",
 ]

@@ -93,6 +93,8 @@ Estructura de modelos/schemas por dominio → [`docs/estructura-modelos.md`](doc
 
 **Dominio del producto:** núcleo del sistema (obras, Task Pool, planificaciones, firmas, trazabilidad) → [`docs/system-core.md`](docs/system-core.md).
 
+**Qué implementar y en qué orden** → [`docs/hoja-de-ruta.md`](docs/hoja-de-ruta.md).
+
 ## Desarrollo local sin Docker (API)
 
 1. Levanta solo MySQL con Compose o usa el `DB_HOST_PORT` ya mapeado.

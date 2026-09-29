@@ -15,6 +15,7 @@ class User(Base):
         Integer,
         ForeignKey("persons.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
+        unique=True,
     )
     username = Column(String(255), nullable=False, unique=True)
     password = Column(Text, nullable=False)
@@ -32,6 +33,11 @@ class User(Base):
 
     person = relationship("Person", back_populates="users")
     role = relationship("UserRole", back_populates="users")
+    permissions = relationship(
+        "UserPermission",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     refresh_tokens = relationship(
         "RefreshToken",
         back_populates="user",

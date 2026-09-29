@@ -49,7 +49,8 @@ Muchos tutoriales hacen esto:
 ### 1. Login (`POST /api/v1/auth/login`)
 
 - Body (form OAuth2, como en Swagger): `username` + `password`
-- Respuesta JSON: `accessToken`, `expiresIn`, datos de usuario
+- Respuesta JSON: `accessToken`, `expiresIn`, datos de usuario (`userId`, `username`, `name`, `roleName`)
+  más **`isSuper`**, **`hasFullAccess`** y **`permissions[]`** (menú / guards — ver [identidad-frontend.md](./identidad-frontend.md))
 - Cookie automática: `refresh_token` con flags:
   - `HttpOnly` → JS no la lee
   - `Secure` → en prod con HTTPS (en local suele ir en `false`)
@@ -283,7 +284,7 @@ Las pantallas de obra **no** deberían llamar a `fetch` directo como única fuen
 
 ### 5. Auth + offline juntos
 
-- [ ] Primer login: **con red** → guardar en local lo mínimo de perfil (userId, nombre, rol) para mostrar UI offline
+- [ ] Primer login: **con red** → guardar en local lo mínimo de perfil (userId, nombre, rol, `permissions`, `hasFullAccess`) para mostrar UI offline
 - [ ] Access JWT: solo memoria (Parte A)
 - [ ] Sin red: no intentes login/refresh; entra con sesión local ya conocida si existe
 - [ ] Al volver la red: `refresh` → si OK, lanzar sync; si el refresh falla, pedir login otra vez (los datos locales pueden conservarse hasta confirmar)
@@ -298,20 +299,21 @@ Las pantallas de obra **no** deberían llamar a `fetch` directo como única fuen
 
 ## Qué pedirá / tendrá el backend (para que el front se prepare)
 
-Hoy el backend tiene auth, usuarios y base lista. Para sync de obras, el contrato típico (a implementar en Quasar junto con los módulos de negocio) será del estilo:
+El contrato de sync ya está expuesto. Detalle: **[`sync-frontend.md`](./sync-frontend.md)**.
 
-| Acción | Idea |
-|--------|------|
-| **Push** | `POST /api/v1/sync/push` — el cliente manda el lote de la outbox |
-| **Pull** | `GET /api/v1/sync/pull?since=ISO-8601` — el servidor devuelve cambios desde esa marca |
-| **IDs** | El cliente manda `uuid`; el servidor lo respeta / mapea |
-| **Conflictos** | Política acordada (p. ej. último `updatedAt` gana, o marcar `conflict` y avisar en UI) |
+| Acción | Endpoint |
+|--------|----------|
+| **Push** | `POST /api/v1/sync/push` — lote de la outbox (uuid + payload) |
+| **Pull** | `GET /api/v1/sync/pull?since=ISO-8601` — deltas desde esa marca |
+| **Fotos** | `POST /api/v1/sync/fotos` — cola multipart con `photoUuid` del cliente |
+| **IDs** | El cliente manda `uuid`; el servidor lo respeta |
+| **Conflictos** | LWW: si el server es más nuevo que `clientUpdatedAt` → `conflict` + `serverRecord` |
 
-Hasta que existan esos endpoints, el frontend **igual** puede:
+El frontend **igual** debe:
 
 1. Montar PWA + IndexedDB + outbox
 2. Implementar el primer módulo de obra **solo local**
-3. Dejar el adaptador de sync listo para enchufar al API
+3. Enchufar el adaptador a push/pull/fotos
 
 No esperes a “tener todo el CRUD online” para empezar el offline: al revés.
 
@@ -369,8 +371,16 @@ Antes de codear el módulo 1, acuerda por escrito las **3–5 acciones** que un 
 2. PWA (instalar + abrir sin red el shell)  
 3. IndexedDB + un módulo de obra offline  
 4. Outbox + worker/sync al evento `online`  
-5. Conectar push/pull cuando el backend exponga sync  
+5. Conectar push/pull — ver [`sync-frontend.md`](./sync-frontend.md)  
 6. Ampliar módulos con el mismo patrón  
 
 Si algo de auth falla: primero `credentials` y CORS.  
 Si algo de offline falla: primero “¿la pantalla lee de IndexedDB o solo del `fetch`?”.
+
+---
+
+## Siguiente: identidad (admin)
+
+Para pantallas de **personas, roles y usuarios**, ver [identidad-frontend.md](./identidad-frontend.md).
+
+Para **catálogos** (cargos, especialidades, unidades, etapas…), ver [catalogos-frontend.md](./catalogos-frontend.md).

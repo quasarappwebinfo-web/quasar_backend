@@ -9,7 +9,7 @@ Modelos SQLAlchemy por dominio (español):
 - planificacion: work plans, firmas
 - auditoria: audit_log
 """
-from app.models.identidad import Person, User, UserRole, RefreshToken
+from app.models.identidad import Person, User, UserRole, UserPermission, RefreshToken
 from app.models.rrhh import (
     WorkerPosition,
     Specialty,
@@ -17,6 +17,7 @@ from app.models.rrhh import (
     Crew,
     CrewMember,
     WorkerAssignment,
+    ObraDailyAttendance,
 )
 from app.models.obras import (
     ObraSaleType,
@@ -29,6 +30,8 @@ from app.models.obras import (
 )
 from app.models.catalogo import (
     TaskCategory,
+    TaskZone,
+    TaskBudgetActivity,
     MeasurementUnit,
     TaskTemplate,
     TaskTemplateVersion,
@@ -43,6 +46,7 @@ from app.models.operacion import (
     Task,
     TaskAssignment,
     TaskCrewAssignment,
+    TaskDailyAssignment,
     TaskDependency,
     TaskDependencyOverride,
     TaskStatusHistory,
@@ -50,6 +54,7 @@ from app.models.operacion import (
     TaskDelayEvent,
     TaskComment,
     TaskPhoto,
+    TaskDocument,
 )
 from app.models.planificacion import (
     WorkPlan,
@@ -65,6 +70,7 @@ __all__ = [
     "Person",
     "User",
     "UserRole",
+    "UserPermission",
     "RefreshToken",
     "WorkerPosition",
     "Specialty",
@@ -72,6 +78,7 @@ __all__ = [
     "Crew",
     "CrewMember",
     "WorkerAssignment",
+    "ObraDailyAttendance",
     "ObraSaleType",
     "ObraStage",
     "Obra",
@@ -80,6 +87,8 @@ __all__ = [
     "DocumentType",
     "Document",
     "TaskCategory",
+    "TaskZone",
+    "TaskBudgetActivity",
     "MeasurementUnit",
     "TaskTemplate",
     "TaskTemplateVersion",
@@ -92,6 +101,7 @@ __all__ = [
     "Task",
     "TaskAssignment",
     "TaskCrewAssignment",
+    "TaskDailyAssignment",
     "TaskDependency",
     "TaskDependencyOverride",
     "TaskStatusHistory",
@@ -99,6 +109,7 @@ __all__ = [
     "TaskDelayEvent",
     "TaskComment",
     "TaskPhoto",
+    "TaskDocument",
     "WorkPlan",
     "WorkPlanVersion",
     "WorkPlanTask",

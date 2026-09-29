@@ -39,6 +39,17 @@ class Settings(BaseSettings):
         "http://127.0.0.1,http://127.0.0.1:3000"
     )
 
+    # AWS S3 — opcionales hasta implementar uploads
+    aws_region: str = "us-east-2"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    s3_bucket: str = ""
+    s3_key_prefix: str = ""
+    s3_public_base_url: str = ""
+    # true = coverImageUrl firmada (bucket privado). false = URL pública (requiere policy).
+    s3_use_presigned_urls: bool = True
+    s3_presign_expire_seconds: int = 86400  # 24h para cards del front
+
     def get_database_url(self) -> str:
         url = self.database_url
         if "${MYSQL_ROOT_PASSWORD}" in url:

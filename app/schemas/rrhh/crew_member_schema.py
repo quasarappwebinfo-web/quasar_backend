@@ -9,6 +9,12 @@ class CrewMemberCreate(BaseCreateSchema):
     worker_id: int
 
 
+class CrewMemberAdd(BaseCreateSchema):
+    """Body para POST /cuadrillas/{id}/miembros (crewId viene de la URL)."""
+
+    worker_id: int
+
+
 class CrewMemberUpdate(BaseUpdateSchema):
     left_at: Optional[datetime] = None
 
@@ -18,3 +24,5 @@ class CrewMemberResponse(BaseResponseSchema):
     worker_id: int
     joined_at: datetime
     left_at: Optional[datetime] = None
+    person_name: Optional[str] = None
+    document_number: Optional[str] = None

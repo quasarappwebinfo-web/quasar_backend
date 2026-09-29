@@ -19,9 +19,15 @@ class TaskTemplatePosition(Base):
         ForeignKey("worker_positions.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
     )
+    specialty_id = Column(
+        Integer,
+        ForeignKey("specialties.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
+    )
     quantity = Column(Numeric(10, 2), nullable=False)
     is_required = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     template_version = relationship("TaskTemplateVersion", back_populates="positions")
     worker_position = relationship("WorkerPosition", back_populates="template_positions")
+    specialty = relationship("Specialty")

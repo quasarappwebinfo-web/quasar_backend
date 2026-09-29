@@ -1,4 +1,6 @@
 from app.models.catalogo.task_category_model import TaskCategory
+from app.models.catalogo.task_zone_model import TaskZone
+from app.models.catalogo.task_budget_activity_model import TaskBudgetActivity
 from app.models.catalogo.measurement_unit_model import MeasurementUnit
 from app.models.catalogo.task_template_model import TaskTemplate
 from app.models.catalogo.task_template_version_model import TaskTemplateVersion
@@ -10,6 +12,8 @@ from app.models.catalogo.task_template_dependency_model import TaskTemplateDepen
 
 __all__ = [
     "TaskCategory",
+    "TaskZone",
+    "TaskBudgetActivity",
     "MeasurementUnit",
     "TaskTemplate",
     "TaskTemplateVersion",

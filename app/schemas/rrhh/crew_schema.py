@@ -24,4 +24,6 @@ class CrewResponse(BaseResponseSchema):
     leader_worker_id: Optional[int] = None
     obra_id: Optional[int] = None
     is_active: int
+    leader_name: Optional[str] = None
+    obra_name: Optional[str] = None
     created_at: Optional[datetime] = None

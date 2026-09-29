@@ -15,6 +15,7 @@ class Worker(Base):
         Integer,
         ForeignKey("persons.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
+        unique=True,
     )
     worker_position_id = Column(
         Integer,
@@ -43,3 +44,7 @@ class Worker(Base):
     crew_memberships = relationship("CrewMember", back_populates="worker")
     led_crews = relationship("Crew", back_populates="leader")
     task_assignments = relationship("TaskAssignment", back_populates="worker")
+    daily_attendance = relationship("ObraDailyAttendance", back_populates="worker")
+    daily_task_assignments = relationship(
+        "TaskDailyAssignment", back_populates="worker"
+    )

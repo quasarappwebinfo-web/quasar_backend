@@ -28,6 +28,7 @@ class Obra(Base):
         nullable=True,
     )
     status = Column(String(30), nullable=False)
+    cover_image_key = Column(String(500), nullable=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
@@ -41,3 +42,4 @@ class Obra(Base):
     crews = relationship("Crew", back_populates="obra")
     tasks = relationship("Task", back_populates="obra")
     work_plans = relationship("WorkPlan", back_populates="obra")
+    daily_attendance = relationship("ObraDailyAttendance", back_populates="obra")

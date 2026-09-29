@@ -6,7 +6,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.api.v1.endpoints import auth, user
+from app.api.v1.endpoints import (
+    asistencia,
+    auth,
+    catalogo_catalogs,
+    crew,
+    obra,
+    operacion_catalogs,
+    obras_catalogs,
+    person,
+    role,
+    rrhh_catalogs,
+    sync,
+    task_ops,
+    task_pool,
+    user,
+    worker,
+    work_plan,
+)
 from app.config import settings
 from app.core.limiter import limiter
 
@@ -36,4 +53,22 @@ async def health():
 
 
 app.include_router(auth.router)
+app.include_router(person.router)
+app.include_router(role.router)
 app.include_router(user.router)
+app.include_router(rrhh_catalogs.worker_position_router)
+app.include_router(rrhh_catalogs.specialty_router)
+app.include_router(operacion_catalogs.delay_reason_router)
+app.include_router(catalogo_catalogs.measurement_unit_router)
+app.include_router(obras_catalogs.document_type_router)
+app.include_router(obras_catalogs.obra_sale_type_router)
+app.include_router(obras_catalogs.obra_stage_router)
+app.include_router(worker.router)
+app.include_router(asistencia.router)
+app.include_router(asistencia.task_day_router)
+app.include_router(crew.router)
+app.include_router(obra.router)
+app.include_router(task_pool.router)
+app.include_router(task_ops.router)
+app.include_router(work_plan.router)
+app.include_router(sync.router)

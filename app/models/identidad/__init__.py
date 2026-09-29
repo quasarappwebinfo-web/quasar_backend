@@ -2,6 +2,7 @@
 from app.models.identidad.person_model import Person
 from app.models.identidad.user_role_model import UserRole
 from app.models.identidad.user_model import User
+from app.models.identidad.user_permission_model import UserPermission
 from app.models.identidad.refresh_token_model import RefreshToken
 
-__all__ = ["Person", "UserRole", "User", "RefreshToken"]
+__all__ = ["Person", "UserRole", "User", "UserPermission", "RefreshToken"]

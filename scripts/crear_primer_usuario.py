@@ -26,13 +26,13 @@ if str(ROOT) not in sys.path:
 
 def main() -> int:
     print("=" * 50)
-    print("  Quasar — crear primer usuario (admin)")
+    print("  Quasar — crear primer usuario (super admin)")
     print("=" * 50)
     print()
     print("Esto crea (si no existen):")
-    print("  1) Rol 'admin'")
+    print("  1) Roles de sistema (super_admin, admin, supervisor, maestro, cliente)")
     print("  2) Persona (cédula + nombre)")
-    print("  3) Usuario con login (username + password)")
+    print("  3) Usuario dueño (rol super_admin, is_super=1)")
     print()
 
     document = input("Cédula / documento: ").strip()
@@ -55,15 +55,18 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        # 1) Rol admin
-        role = db.query(UserRole).filter(UserRole.name == "admin").first()
-        if not role:
-            role = UserRole(name="admin", is_active=1)
-            db.add(role)
-            db.flush()
-            print(f"✓ Rol 'admin' creado (id={role.id})")
-        else:
-            print(f"• Rol 'admin' ya existía (id={role.id})")
+        # 1) Roles de sistema
+        for role_name in ("super_admin", "admin", "supervisor", "maestro", "cliente"):
+            r = db.query(UserRole).filter(UserRole.name == role_name).first()
+            if not r:
+                r = UserRole(name=role_name, is_active=1)
+                db.add(r)
+                db.flush()
+                print(f"✓ Rol '{role_name}' creado (id={r.id})")
+            else:
+                print(f"• Rol '{role_name}' ya existía (id={r.id})")
+
+        role = db.query(UserRole).filter(UserRole.name == "super_admin").first()
 
         # 2) Persona
         person = db.query(Person).filter(Person.document_number == document).first()
@@ -93,7 +96,7 @@ def main() -> int:
         )
         db.add(user)
         db.commit()
-        print(f"✓ Usuario creado (id={user.id}, username={username}, rol=admin, is_super=1)")
+        print(f"✓ Usuario creado (id={user.id}, username={username}, rol=super_admin, is_super=1)")
         print()
         print("Listo. Puedes iniciar sesión en POST /api/v1/auth/login")
         print(f"  username: {username}")

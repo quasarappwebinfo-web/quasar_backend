@@ -6,6 +6,7 @@ from app.api.deps import get_current_user, get_db
 from app.config import settings
 from app.core.cookies import clear_refresh_cookie, set_refresh_cookie
 from app.core.limiter import limiter
+from app.core.permissions import has_full_access, permission_codes_of
 from app.models import User
 from app.schemas import AccessTokenResponse, LoginResponse, UserResponse
 from app.services.auth_service import (
@@ -72,6 +73,9 @@ async def login(
         username=user.username,
         name=user.person.name if user.person else user.username,
         role_name=user.role.name if user.role else "",
+        is_super=user.is_super or 0,
+        has_full_access=has_full_access(user),
+        permissions=permission_codes_of(user),
     )
 
 
@@ -130,5 +134,4 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     summary="Usuario autenticado",
 )
 async def me(current_user: User = Depends(get_current_user)):
-    user_dict = user_to_dict(current_user)
-    return UserResponse(**user_dict)
+    return UserResponse(**user_to_dict(current_user)).model_dump(by_alias=True)

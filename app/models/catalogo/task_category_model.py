@@ -17,3 +17,6 @@ class TaskCategory(Base):
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
     templates = relationship("TaskTemplate", back_populates="category")
+    budget_activities = relationship(
+        "TaskBudgetActivity", back_populates="category"
+    )

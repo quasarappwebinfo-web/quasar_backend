@@ -29,7 +29,11 @@ class InvalidRefreshTokenError(Exception):
 def authenticate_user(db: Session, username: str, password: str) -> User:
     user = (
         db.query(User)
-        .options(joinedload(User.role), joinedload(User.person))
+        .options(
+            joinedload(User.role),
+            joinedload(User.person),
+            joinedload(User.permissions),
+        )
         .filter(User.username == username)
         .first()
     )

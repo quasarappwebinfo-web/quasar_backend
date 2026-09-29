@@ -44,12 +44,21 @@ class Task(Base):
     actual_start_date = Column(Date, nullable=True)
     actual_end_date = Column(Date, nullable=True)
     status = Column(String(30), nullable=False)
+    # Peso de una subtarea dentro de su padre (suma ideal 100)
+    weight_percent = Column(Numeric(6, 2), nullable=True)
+    # Peso de la actividad hacia su actividad presupuestal (copiado de plantilla)
+    budget_weight_percent = Column(Numeric(6, 2), nullable=True)
     created_by = Column(
         Integer,
         ForeignKey("users.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
     )
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_by = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
+    )
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
     obra = relationship("Obra", back_populates="tasks")
@@ -57,8 +66,10 @@ class Task(Base):
     parent = relationship("Task", remote_side=[id], backref="subtasks")
     unit = relationship("MeasurementUnit", back_populates="tasks")
     created_by_user = relationship("User", foreign_keys=[created_by])
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
     assignments = relationship("TaskAssignment", back_populates="task")
     crew_assignments = relationship("TaskCrewAssignment", back_populates="task")
+    daily_assignments = relationship("TaskDailyAssignment", back_populates="task")
     dependencies = relationship(
         "TaskDependency",
         back_populates="task",
@@ -70,4 +81,5 @@ class Task(Base):
     delay_events = relationship("TaskDelayEvent", back_populates="task")
     comments = relationship("TaskComment", back_populates="task")
     photos = relationship("TaskPhoto", back_populates="task")
+    documents = relationship("TaskDocument", back_populates="task")
     work_plan_tasks = relationship("WorkPlanTask", back_populates="task")

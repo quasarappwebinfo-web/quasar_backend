@@ -21,3 +21,4 @@ class UserRoleUpdate(BaseUpdateSchema):
 class UserRoleResponse(BaseResponseSchema):
     name: str
     is_active: int
+    is_system: bool = False

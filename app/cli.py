@@ -58,6 +58,16 @@ def create_user_cmd(
         if not db.query(Person).filter(Person.id == person_id).first():
             click.echo(f"Error: no existe persons.id={person_id}", err=True)
             return
+        existing_person_user = (
+            db.query(User).filter(User.person_id == person_id).first()
+        )
+        if existing_person_user:
+            click.echo(
+                f"Error: la persona {person_id} ya tiene usuario "
+                f"'{existing_person_user.username}'",
+                err=True,
+            )
+            return
         if db.query(User).filter(User.username == username).first():
             click.echo(f"Error: el usuario '{username}' ya existe", err=True)
             return

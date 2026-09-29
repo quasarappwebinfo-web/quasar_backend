@@ -21,4 +21,6 @@ class WorkerAssignmentResponse(BaseResponseSchema):
     start_date: date
     end_date: Optional[date] = None
     assigned_by: int
+    person_name: Optional[str] = None
+    obra_name: Optional[str] = None
     created_at: Optional[datetime] = None
