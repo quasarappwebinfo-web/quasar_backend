@@ -16,6 +16,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    cols = {
+        c["name"]
+        for c in sa.inspect(bind).get_columns("task_template_positions")
+    }
+    if "specialty_id" in cols:
+        return
     op.add_column(
         "task_template_positions",
         sa.Column("specialty_id", sa.Integer(), nullable=True),

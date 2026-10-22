@@ -16,19 +16,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "tasks",
-        sa.Column("updated_by", sa.Integer(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_tasks_updated_by",
-        "tasks",
-        "users",
-        ["updated_by"],
-        ["id"],
-        ondelete="NO ACTION",
-        onupdate="NO ACTION",
-    )
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    task_cols = {c["name"] for c in insp.get_columns("tasks")}
+    if "updated_by" in task_cols and "task_documents" in insp.get_table_names():
+        return
+    if "updated_by" not in task_cols:
+        op.add_column(
+            "tasks",
+            sa.Column("updated_by", sa.Integer(), nullable=True),
+        )
+        op.create_foreign_key(
+            "fk_tasks_updated_by",
+            "tasks",
+            "users",
+            ["updated_by"],
+            ["id"],
+            ondelete="NO ACTION",
+            onupdate="NO ACTION",
+        )
+    if "task_documents" in insp.get_table_names():
+        return
     op.create_table(
         "task_documents",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

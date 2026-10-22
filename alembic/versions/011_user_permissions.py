@@ -24,27 +24,30 @@ SYSTEM_ROLES = (
 
 
 def upgrade() -> None:
-    op.create_table(
-        "user_permissions",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("permission", sa.String(length=50), nullable=False),
-        sa.ForeignKeyConstraint(
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if "user_permissions" not in insp.get_table_names():
+        op.create_table(
+            "user_permissions",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("permission", sa.String(length=50), nullable=False),
+            sa.ForeignKeyConstraint(
+                ["user_id"],
+                ["users.id"],
+                name="fk_user_permissions_user_id",
+                ondelete="CASCADE",
+                onupdate="NO ACTION",
+            ),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("user_id", "permission", name="uq_user_permission"),
+        )
+        op.create_index(
+            "ix_user_permissions_user_id",
+            "user_permissions",
             ["user_id"],
-            ["users.id"],
-            name="fk_user_permissions_user_id",
-            ondelete="CASCADE",
-            onupdate="NO ACTION",
-        ),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "permission", name="uq_user_permission"),
-    )
-    op.create_index(
-        "ix_user_permissions_user_id",
-        "user_permissions",
-        ["user_id"],
-        unique=False,
-    )
+            unique=False,
+        )
 
     # Roles de sistema (idempotente)
     roles = sa.table(
