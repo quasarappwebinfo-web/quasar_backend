@@ -16,6 +16,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    tables = set(insp.get_table_names())
+    cols = {c["name"] for c in insp.get_columns("task_budget_activities")}
+    # El esquema actual ya usa chapter_id / task_chapters.
+    if "chapter_id" in cols or "category_id" in cols:
+        return
+    if "task_categories" not in tables:
+        return
     op.add_column(
         "task_budget_activities",
         sa.Column("category_id", sa.Integer(), nullable=True),

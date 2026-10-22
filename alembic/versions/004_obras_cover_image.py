@@ -16,6 +16,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("obras")}
+    if "cover_image_key" in cols:
+        return
     op.add_column(
         "obras",
         sa.Column("cover_image_key", sa.String(length=500), nullable=True),

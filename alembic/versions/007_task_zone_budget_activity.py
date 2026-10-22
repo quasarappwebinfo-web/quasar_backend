@@ -16,6 +16,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    tables = set(insp.get_table_names())
+    if "task_zones" in tables and "task_budget_activities" in tables:
+        template_cols = {c["name"] for c in insp.get_columns("task_templates")}
+        if "zone_id" in template_cols and "budget_activity_id" in template_cols:
+            return
     op.create_table(
         "task_zones",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
