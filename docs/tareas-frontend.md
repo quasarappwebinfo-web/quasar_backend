@@ -59,19 +59,40 @@ Ruta sugerida: `/tareas` o `/obras/:obraId/tareas`.
 | UI | API |
 |----|-----|
 | Filtro proyecto | `obraId` |
-| Filtro categoría | `categoryId` (categoría Task Pool) |
+| Filtro capítulo | `chapterId` (capítulo Task Pool) |
 | Rango fechas | `dateFrom` + `dateTo` |
 | Columnas + contadores | `GET /tablero?obraId=` |
+| Avance por capítulo y global | `GET /cumplimiento?obraId=` |
 | “+” por columna | Wizard → `POST /desde-plantilla` (nace siempre `scheduled`) |
 | Drag de card | `POST /{id}/estado` |
 | Card | campos de `TaskResponse` (abajo) |
+
+### Cumplimiento de la obra
+
+`GET /api/v1/operacion/tareas/cumplimiento?obraId=`
+
+`obraId` es el único query y es **obligatorio**. No hay body.
+
+| Campo de la respuesta | Qué pintar |
+|-----------------------|------------|
+| `progressPercent` | Avance global de la obra, `0`–`100`. Usa el `%` del capítulo y el de la actividad presupuestal |
+| `period` | Plan que cubre hoy (o el más reciente). `progressPercent` es el avance de las actividades de ese periodo, con los mismos `%` |
+| `activityStatus` | Conteos del periodo: `completed` (completadas + verificadas), `inProgress`, `pending` (programadas + reprogramadas). Si no hay periodo, cuenta toda la obra |
+| `chapters[].chapterName` | Nombre del capítulo |
+| `chapters[].weightPercent` | `%` que ese capítulo aporta al global. Puede venir `null` si no se cargó en el pool |
+| `chapters[].progressPercent` | Cómo va ese capítulo |
+| `chapters[].budgetActivities[].budgetActivityName` | Actividad presupuestal |
+| `chapters[].budgetActivities[].weightPercent` | `%` de esa actividad dentro del capítulo. Puede venir `null` |
+| `chapters[].budgetActivities[].progressPercent` | Cómo va esa actividad presupuestal |
+
+Si un grupo no tiene pesos cargados, el backend reparte el avance de ese grupo por igual. No pidas esos `%` para poder ver la pantalla.
 
 ### Card — contrato visual
 
 | UI | Campo |
 |----|--------|
 | Título | `name` |
-| Badge color | `categoryName` (+ color local por categoría) |
+| Badge color | `chapterName` (+ color local por capítulo) |
 | Avatar / nombre / rol | `primaryAssignee.initials`, `.workerName` o `.crewName`, `.positionName` |
 | % barra (solo en progreso) | `progressPercent` (subtareas hechas / total) |
 | Fecha | `plannedStartDate` / `plannedEndDate`; si reprogramada sin fecha → copy “Movido…” |
@@ -90,7 +111,7 @@ Carga: `GET /api/v1/operacion/tareas/{id}` (incluye subtareas, fotos, docs, nota
 | Editar / Guardar | lápiz + **GUARDAR CAMBIOS** | `PUT /{id}` (setea `updatedBy` + `updatedAt`) |
 | Fechas programada / límite | `plannedStartDate` / `plannedEndDate` | `PUT` |
 | Asignado | `primaryAssignee` o `assignments` | asignaciones existentes |
-| Categoría | `categoryName` | — |
+| Capítulo | `chapterName` | — |
 | Descripción | `description` | `PUT` |
 | **Marcar como retrasada** | toggle + motivo 0/250 | `POST /{id}/marcar-retraso` |
 | **Subtareas** N/M + % | `subtasks` + `progressPercent` | checkbox → `POST /{id}/subtareas/{subId}/toggle?completed=` |
@@ -160,9 +181,11 @@ Base: `/api/v1/operacion/tareas`
 
 | Acción | Método | Ruta |
 |--------|--------|------|
-| Listar | `GET` | `?obraId&status&categoryId&search&dateFrom&dateTo&parentOnly&parentTaskId&page` |
+| Listar | `GET` | `?obraId&status&chapterId&search&dateFrom&dateTo&parentOnly&parentTaskId&page` |
 | Kanban | `GET` | `/tablero?obraId=` |
+| Cumplimiento | `GET` | `/cumplimiento?obraId=` → ver campos abajo |
 | Desde plantilla | `POST` | `/desde-plantilla` → `201` |
+| Al periodo | `POST` | `/agregar-al-periodo` → `201`. Pool sin versión, o actividad solo de la obra. Exige justificación, avisa a los admins y deja el plan del periodo en `pending_signature` |
 | Manual / subtarea | `POST` | `/` → `201` |
 | Detalle | `GET` | `/{id}` |
 | Editar cabecera | `PUT` | `/{id}` |
@@ -205,17 +228,32 @@ Errores: `400` · `404` · `409` (duplicado **o** inicio bloqueado por deps).
 }
 ```
 
+| Campo | Al crear | Qué es |
+|-------|----------|--------|
+| `obraId` | **Obligatorio** | Obra donde nace la tarea |
+| `templateId` | Obligatorio si no hay versión | Actividad registrada. Sin versión la tarea queda programada, sin cantidad, duración ni sugerencia |
+| `sourceTemplateVersionId` | Opcional | Si se envía, tiene que estar `published`. Copia unidad, subtareas y dependencias |
+| `uuid` | Opcional | Id de cliente. Si se omite, lo genera el backend |
+| `plannedQuantity` | Opcional | Cantidad de obra. Sin ella, la tarea se crea igual y no hay duración estimada |
+| `approvedDurationDays` | Opcional | Si no se envía y hay estimación, se usa esa. Si no hay estimación, queda vacío |
+| `plannedStartDate` | Opcional | Fecha |
+| `plannedEndDate` | Opcional | Fecha |
+| `name` | Opcional | Si se omite, se usa el nombre de la plantilla |
+| `description` | Opcional | Si se omite, se usa la de la versión |
+| `copySubtasks` | Opcional, default `true` | Copia las subtareas de la versión. Si la versión no tiene, no pasa nada |
+| `instantiateDependencies` | Opcional, default `true` | Intenta crear dependencias en la misma obra |
+
 Qué hace el backend:
 
-1. Exige versión **`published`**.
-2. Calcula `estimatedDurationDays = baseDuration × (obraQty / baseQty)`.
-3. `approvedDurationDays` = el que mandes, o la estimación.
+1. Con solo `templateId` crea la tarea en `scheduled`, copia el nombre y el `%` de la actividad registrada, y no calcula rendimiento.
+2. Si viene `sourceTemplateVersionId`, exige versión **`published`**. Si hay `plannedQuantity`, `baseQuantity` y `baseDurationDays`, calcula `estimatedDurationDays = baseDuration × (obraQty / baseQty)`. Si faltan, la tarea se crea igual, sin duración estimada.
+3. `approvedDurationDays` = el que mandes, o la estimación cuando existe.
 4. Copia unidad primaria de la plantilla.
 5. Status `scheduled` + fila en `task_status_history`.
 6. Si `copySubtasks`: crea hijas con `parentTaskId`.
 7. Si `instantiateDependencies`: busca en la **misma obra** una tarea cuya plantilla coincida con `dependsOnTemplateId` y crea `task_dependencies`.
 
-Wizard UI sugerido:
+En planificación el periodo usa `templateId` y no pide versión ni recomendación. El wizard de rendimiento, si se usa, sigue así:
 
 1. Elegir plantilla published → mostrar recomendación (`POST .../recomendar` del Task Pool).
 2. Supervisor edita duración aprobada + fechas.
@@ -233,6 +271,21 @@ Wizard UI sugerido:
   "plannedStartDate": "2026-09-06"
 }
 ```
+
+| Campo | Al crear | Qué es |
+|-------|----------|--------|
+| `obraId` | **Obligatorio** | Obra |
+| `name` | **Obligatorio** | 1–255 caracteres |
+| `parentTaskId` | Opcional | Si viene, la tarea es subtarea de ese padre y debe ser de la misma obra |
+| `uuid` | Opcional | Id de cliente |
+| `description` | Opcional | Texto libre |
+| `unitId` | Opcional | Unidad de medida |
+| `plannedQuantity` | Opcional | Cantidad |
+| `estimatedDurationDays` | Opcional | Días estimados |
+| `approvedDurationDays` | Opcional | Días aprobados |
+| `plannedStartDate` | Opcional | Fecha |
+| `plannedEndDate` | Opcional | Fecha |
+| `weightPercent` | Opcional | `%` de la subtarea dentro del padre. `0`–`100`. No es obligatorio ni en subtareas |
 
 ---
 

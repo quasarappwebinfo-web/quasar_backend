@@ -13,9 +13,9 @@ from app.schemas import (
     TaskBudgetActivityCreate,
     TaskBudgetActivityResponse,
     TaskBudgetActivityUpdate,
-    TaskCategoryCreate,
-    TaskCategoryResponse,
-    TaskCategoryUpdate,
+    TaskChapterCreate,
+    TaskChapterResponse,
+    TaskChapterUpdate,
     TaskTemplateCreate,
     TaskTemplateCrewResponse,
     TaskTemplateDependencyAdd,
@@ -54,11 +54,11 @@ def _err(exc: Exception):
     raise exc
 
 
-# ---------- Categorías ----------
+# ---------- Capítulos ----------
 
 
-@router.get("/categorias-tarea", summary="Listar categorías del Task Pool")
-async def list_categories(
+@router.get("/capitulos-tarea", summary="Listar capítulos del Task Pool")
+async def list_chapters(
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
     active_only: bool = Query(False),
@@ -66,65 +66,65 @@ async def list_categories(
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
 ):
     _ = user_auth
-    result = await svc.list_categories(
+    result = await svc.list_chapters(
         db, page=page, search=search, active_only=active_only
     )
     return {
-        "categories": [
-            TaskCategoryResponse(**c).model_dump(by_alias=True)
-            for c in result["categories"]
+        "chapters": [
+            TaskChapterResponse(**c).model_dump(by_alias=True)
+            for c in result["chapters"]
         ],
         "pagination": result["pagination"],
     }
 
 
 @router.post(
-    "/categorias-tarea",
+    "/capitulos-tarea",
     status_code=status.HTTP_201_CREATED,
-    summary="Crear categoría",
+    summary="Crear capítulo",
 )
-async def create_category(
-    data: TaskCategoryCreate,
+async def create_chapter(
+    data: TaskChapterCreate,
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
 ):
     _ = user_auth
     try:
-        row = await svc.create_category(db, data)
-        return TaskCategoryResponse(**svc.category_to_dict(row)).model_dump(
+        row = await svc.create_chapter(db, data)
+        return TaskChapterResponse(**svc.chapter_to_dict(row)).model_dump(
             by_alias=True
         )
     except svc.TaskPoolError as e:
         _err(e)
 
 
-@router.get("/categorias-tarea/{item_id}", summary="Obtener categoría")
-async def get_category(
+@router.get("/capitulos-tarea/{item_id}", summary="Obtener capítulo")
+async def get_chapter(
     item_id: int,
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
 ):
     _ = user_auth
     try:
-        row = await svc.get_category(db, item_id)
-        return TaskCategoryResponse(**svc.category_to_dict(row)).model_dump(
+        row = await svc.get_chapter(db, item_id)
+        return TaskChapterResponse(**svc.chapter_to_dict(row)).model_dump(
             by_alias=True
         )
     except svc.TaskPoolError as e:
         _err(e)
 
 
-@router.put("/categorias-tarea/{item_id}", summary="Actualizar categoría")
-async def update_category(
+@router.put("/capitulos-tarea/{item_id}", summary="Actualizar capítulo")
+async def update_chapter(
     item_id: int,
-    data: TaskCategoryUpdate,
+    data: TaskChapterUpdate,
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
 ):
     _ = user_auth
     try:
-        row = await svc.update_category(db, item_id, data)
-        return TaskCategoryResponse(**svc.category_to_dict(row)).model_dump(
+        row = await svc.update_chapter(db, item_id, data)
+        return TaskChapterResponse(**svc.chapter_to_dict(row)).model_dump(
             by_alias=True
         )
     except svc.TaskPoolError as e:
@@ -212,7 +212,7 @@ async def update_zone(
 async def list_budget_activities(
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    category_id: Optional[int] = Query(None),
+    chapter_id: Optional[int] = Query(None, alias="chapterId"),
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
@@ -222,7 +222,7 @@ async def list_budget_activities(
         db,
         page=page,
         search=search,
-        category_id=category_id,
+        chapter_id=chapter_id,
         active_only=active_only,
     )
     return {
@@ -300,7 +300,7 @@ async def update_budget_activity(
 async def list_templates(
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    category_id: Optional[int] = Query(None),
+    chapter_id: Optional[int] = Query(None, alias="chapterId"),
     zone_id: Optional[int] = Query(None),
     budget_activity_id: Optional[int] = Query(None),
     active_only: bool = Query(False),
@@ -312,7 +312,7 @@ async def list_templates(
         db,
         page=page,
         search=search,
-        category_id=category_id,
+        chapter_id=chapter_id,
         zone_id=zone_id,
         budget_activity_id=budget_activity_id,
         active_only=active_only,

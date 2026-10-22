@@ -22,18 +22,37 @@ SIGNATURE_EVENT_TYPES = (
 
 
 class WorkPlanCreate(BaseCreateSchema):
-    """Crea plan + versión 1 + snapshots de tareas."""
+    """Crea plan + versión 1 + snapshots.
+
+    `template_ids` registra actividades del catálogo en el periodo, sin versión.
+    `task_ids` trae actividades ya existentes (las que faltaron en otro periodo).
+    Hace falta al menos una de las dos listas.
+    """
 
     uuid: Optional[str] = Field(None, max_length=36)
     obra_id: int
     name: str = Field(..., min_length=1, max_length=255)
     start_date: date
     end_date: date
-    task_ids: List[int] = Field(
-        ...,
-        min_length=1,
-        description="Tareas de la obra a incluir en el snapshot v1",
-    )
+    task_ids: List[int] = Field(default_factory=list)
+    template_ids: List[int] = Field(default_factory=list)
+
+
+class UnfinishedPlanActivity(BaseSchema):
+    """Actividad de un periodo anterior que no quedó completed ni verified."""
+
+    id: int
+    name: str
+    status: str
+    planned_start_date: Optional[date] = None
+    planned_end_date: Optional[date] = None
+    template_id: Optional[int] = None
+    template_code: Optional[str] = None
+    chapter_name: Optional[str] = None
+    source_plan_id: Optional[int] = None
+    source_plan_name: Optional[str] = None
+    source_plan_start_date: Optional[date] = None
+    source_plan_end_date: Optional[date] = None
 
 
 class WorkPlanUpdate(BaseUpdateSchema):

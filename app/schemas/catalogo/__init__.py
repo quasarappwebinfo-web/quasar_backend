@@ -1,7 +1,7 @@
-from app.schemas.catalogo.task_category_schema import (
-    TaskCategoryCreate,
-    TaskCategoryUpdate,
-    TaskCategoryResponse,
+from app.schemas.catalogo.task_chapter_schema import (
+    TaskChapterCreate,
+    TaskChapterUpdate,
+    TaskChapterResponse,
 )
 from app.schemas.catalogo.task_zone_schema import (
     TaskZoneCreate,
@@ -54,9 +54,9 @@ from app.schemas.catalogo.task_template_detail_schemas import (
 )
 
 __all__ = [
-    "TaskCategoryCreate",
-    "TaskCategoryUpdate",
-    "TaskCategoryResponse",
+    "TaskChapterCreate",
+    "TaskChapterUpdate",
+    "TaskChapterResponse",
     "TaskZoneCreate",
     "TaskZoneUpdate",
     "TaskZoneResponse",

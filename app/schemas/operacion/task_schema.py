@@ -27,12 +27,25 @@ COMMENT_TYPES = ("comment", "instruction")
 
 
 class TaskCreateFromTemplate(BaseCreateSchema):
-    """Crear tarea desde versión published del Task Pool."""
+    """Crear tarea desde una actividad registrada.
+
+    `template_id` basta para dejarla en un periodo, sin versión ni rendimiento.
+    `source_template_version_id` sigue disponible cuando hay una versión published
+    y se quiere copiar cantidad, subtareas y dependencias.
+    """
 
     uuid: Optional[str] = Field(None, max_length=36)
     obra_id: int
-    source_template_version_id: int
-    planned_quantity: Decimal = Field(..., gt=0)
+    template_id: Optional[int] = Field(
+        None,
+        description="Actividad registrada. Sin versión no hay rendimiento ni sugerencia.",
+    )
+    source_template_version_id: Optional[int] = None
+    planned_quantity: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        description="Opcional. Solo se usa si la versión tiene cantidad y duración base.",
+    )
     approved_duration_days: Optional[Decimal] = Field(
         None, description="Si se omite, se usa la duración recomendada"
     )
@@ -44,6 +57,23 @@ class TaskCreateFromTemplate(BaseCreateSchema):
     description: Optional[str] = None
     copy_subtasks: bool = True
     instantiate_dependencies: bool = True
+
+
+class TaskAddToPeriod(BaseCreateSchema):
+    """Agrega una actividad al periodo vigente y pide de nuevo la firma."""
+
+    obra_id: int
+    template_id: Optional[int] = Field(
+        None,
+        description="Actividad del pool. Sin versión ni rendimiento.",
+    )
+    name: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Obligatorio si no hay templateId. Actividad única de la obra.",
+    )
+    description: Optional[str] = None
+    justification: str = Field(..., min_length=8, max_length=2000)
 
 
 class TaskCreateManual(BaseCreateSchema):
@@ -64,7 +94,7 @@ class TaskCreateManual(BaseCreateSchema):
         None,
         ge=0,
         le=100,
-        description="Obligatorio en subtareas: % hacia el 100% de la actividad padre",
+        description="Opcional. % hacia el 100% de la actividad padre",
     )
 
 
@@ -113,11 +143,12 @@ class TaskResponse(BaseResponseSchema):
     uuid: str
     obra_id: int
     obra_name: Optional[str] = None
+    source_template_id: Optional[int] = None
     source_template_version_id: Optional[int] = None
     template_code: Optional[str] = None
     template_name: Optional[str] = None
-    category_id: Optional[int] = None
-    category_name: Optional[str] = None
+    chapter_id: Optional[int] = None
+    chapter_name: Optional[str] = None
     zone_id: Optional[int] = None
     zone_name: Optional[str] = None
     budget_activity_id: Optional[int] = None
@@ -192,3 +223,43 @@ class TaskStatusChangeResult(BaseSchema):
     blocked: bool = False
     blocking_dependencies: List[TaskBlockingDependency] = []
     forced: bool = False
+
+
+class BudgetActivityFulfillment(BaseSchema):
+    budget_activity_id: Optional[int] = None
+    budget_activity_name: Optional[str] = None
+    weight_percent: Optional[Decimal] = None
+    progress_percent: Decimal
+
+
+class ChapterFulfillment(BaseSchema):
+    chapter_id: Optional[int] = None
+    chapter_name: Optional[str] = None
+    weight_percent: Optional[Decimal] = None
+    progress_percent: Decimal
+    budget_activities: List[BudgetActivityFulfillment]
+
+
+class ActivityStatusSummary(BaseSchema):
+    completed: int = 0
+    in_progress: int = 0
+    pending: int = 0
+    total: int = 0
+
+
+class PeriodFulfillment(BaseSchema):
+    plan_id: Optional[int] = None
+    plan_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    progress_percent: Decimal
+
+
+class ObraFulfillmentResponse(BaseSchema):
+    obra_id: int
+    progress_percent: Decimal
+    chapters: List[ChapterFulfillment]
+    period: Optional[PeriodFulfillment] = None
+    activity_status: ActivityStatusSummary = Field(
+        default_factory=ActivityStatusSummary
+    )

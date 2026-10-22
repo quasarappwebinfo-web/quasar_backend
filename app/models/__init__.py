@@ -9,7 +9,14 @@ Modelos SQLAlchemy por dominio (español):
 - planificacion: work plans, firmas
 - auditoria: audit_log
 """
-from app.models.identidad import Person, User, UserRole, UserPermission, RefreshToken
+from app.models.identidad import (
+    Person,
+    User,
+    UserRole,
+    UserPermission,
+    RefreshToken,
+    UserNotification,
+)
 from app.models.rrhh import (
     WorkerPosition,
     Specialty,
@@ -29,7 +36,7 @@ from app.models.obras import (
     Document,
 )
 from app.models.catalogo import (
-    TaskCategory,
+    TaskChapter,
     TaskZone,
     TaskBudgetActivity,
     MeasurementUnit,
@@ -72,6 +79,7 @@ __all__ = [
     "UserRole",
     "UserPermission",
     "RefreshToken",
+    "UserNotification",
     "WorkerPosition",
     "Specialty",
     "Worker",
@@ -86,7 +94,7 @@ __all__ = [
     "ObraStageHistory",
     "DocumentType",
     "Document",
-    "TaskCategory",
+    "TaskChapter",
     "TaskZone",
     "TaskBudgetActivity",
     "MeasurementUnit",

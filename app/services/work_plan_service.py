@@ -9,20 +9,31 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     Obra,
     Task,
     TaskDelayEvent,
+    TaskTemplateVersion,
     User,
+    UserNotification,
+    UserRole,
     WorkPlan,
     WorkPlanSignature,
     WorkPlanSignatureEvent,
     WorkPlanSigner,
     WorkPlanTask,
     WorkPlanVersion,
+)
+from app.schemas.operacion.task_schema import TaskAddToPeriod, TaskCreateFromTemplate
+from app.services.task_service import (
+    _period_plan,
+    add_task_from_catalog,
+    add_unique_obra_task,
+    get_task,
+    task_to_dict,
 )
 from app.schemas import (
     WorkPlanCreate,
@@ -371,6 +382,73 @@ async def list_plans(
     }
 
 
+async def list_unfinished_activities(
+    db: Session, obra_id: int
+) -> List[Dict[str, Any]]:
+    """Actividades de periodos anteriores que no se completaron ni verificaron."""
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise WorkPlanValidationError(f"Obra {obra_id} no existe")
+
+    rows = (
+        db.query(Task)
+        .options(
+            joinedload(Task.source_template),
+            joinedload(Task.source_template_version).joinedload(
+                TaskTemplateVersion.task_template
+            ),
+            joinedload(Task.work_plan_tasks)
+            .joinedload(WorkPlanTask.work_plan_version)
+            .joinedload(WorkPlanVersion.work_plan),
+        )
+        .filter(
+            Task.obra_id == obra_id,
+            Task.parent_task_id.is_(None),
+            Task.status.in_(("scheduled", "in_progress", "rescheduled")),
+        )
+        .all()
+    )
+    items: List[Dict[str, Any]] = []
+    for task in rows:
+        plans = []
+        for snap in task.work_plan_tasks or []:
+            version = snap.work_plan_version
+            plan = version.work_plan if version else None
+            if plan and plan.obra_id == obra_id:
+                plans.append(plan)
+        if not plans:
+            continue
+        latest = max(plans, key=lambda plan: (plan.end_date, plan.id))
+        template = task.source_template
+        if template is None and task.source_template_version:
+            template = task.source_template_version.task_template
+        chapter = template.chapter if template else None
+        items.append(
+            {
+                "id": task.id,
+                "name": task.name,
+                "status": task.status,
+                "planned_start_date": task.planned_start_date,
+                "planned_end_date": task.planned_end_date,
+                "template_id": template.id if template else task.source_template_id,
+                "template_code": template.code if template else None,
+                "chapter_name": chapter.name if chapter else None,
+                "source_plan_id": latest.id,
+                "source_plan_name": latest.name,
+                "source_plan_start_date": latest.start_date,
+                "source_plan_end_date": latest.end_date,
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            item["source_plan_end_date"] or date.min,
+            item["name"],
+        ),
+        reverse=True,
+    )
+    return items
+
+
 async def create_plan(
     db: Session,
     data: WorkPlanCreate,
@@ -388,17 +466,51 @@ async def create_plan(
     if exists:
         raise WorkPlanConflictError(f"Plan con uuid={uid} ya existe")
 
-    tasks = (
-        db.query(Task)
-        .options(joinedload(Task.unit))
-        .filter(Task.id.in_(data.task_ids), Task.obra_id == data.obra_id)
-        .all()
-    )
-    found_ids = {t.id for t in tasks}
-    missing = [i for i in data.task_ids if i not in found_ids]
-    if missing:
+    task_ids = list(dict.fromkeys(data.task_ids or []))
+    template_ids = list(dict.fromkeys(data.template_ids or []))
+    if not task_ids and not template_ids:
         raise WorkPlanValidationError(
-            f"Tareas no encontradas en la obra: {missing}"
+            "Selecciona al menos una actividad para el periodo."
+        )
+
+    tasks: List[Task] = []
+    if task_ids:
+        tasks = (
+            db.query(Task)
+            .options(joinedload(Task.unit))
+            .filter(Task.id.in_(task_ids), Task.obra_id == data.obra_id)
+            .all()
+        )
+        found_ids = {t.id for t in tasks}
+        missing = [i for i in task_ids if i not in found_ids]
+        if missing:
+            raise WorkPlanValidationError(
+                f"Tareas no encontradas en la obra: {missing}"
+            )
+        open_statuses = {"scheduled", "in_progress", "rescheduled"}
+        for task in tasks:
+            if task.parent_task_id is not None:
+                raise WorkPlanValidationError(
+                    f"«{task.name}» es una subtarea. El periodo incluye la actividad."
+                )
+            if task.status in open_statuses:
+                task.planned_start_date = data.start_date
+                task.planned_end_date = data.end_date
+
+    for template_id in template_ids:
+        tasks.append(
+            add_task_from_catalog(
+                db,
+                TaskCreateFromTemplate(
+                    obra_id=data.obra_id,
+                    template_id=template_id,
+                    planned_start_date=data.start_date,
+                    planned_end_date=data.end_date,
+                    copy_subtasks=False,
+                    instantiate_dependencies=False,
+                ),
+                created_by=requested_by,
+            )
         )
 
     plan = WorkPlan(
@@ -717,6 +829,224 @@ async def remove_signer(
         details=f"Firmante quitado: {name}",
     )
     db.commit()
+
+
+def _admin_users(db: Session) -> List[User]:
+    return (
+        db.query(User)
+        .options(joinedload(User.person), joinedload(User.role))
+        .outerjoin(UserRole, User.role_id == UserRole.id)
+        .filter(User.is_active == 1)
+        .filter(or_(User.is_super == 1, UserRole.name.ilike("%admin%")))
+        .all()
+    )
+
+
+def _add_signer_row(db: Session, version_id: int, user_id: int, order: int) -> None:
+    exists = (
+        db.query(WorkPlanSigner)
+        .filter(
+            WorkPlanSigner.work_plan_version_id == version_id,
+            WorkPlanSigner.user_id == user_id,
+        )
+        .first()
+    )
+    if exists:
+        if exists.status != SIGNER_PENDING:
+            exists.status = SIGNER_PENDING
+            exists.signed_at = None
+            exists.rejected_at = None
+            exists.rejection_reason = None
+        return
+    db.add(
+        WorkPlanSigner(
+            work_plan_version_id=version_id,
+            user_id=user_id,
+            signature_order=order,
+            status=SIGNER_PENDING,
+        )
+    )
+
+
+def _ensure_admin_signers(db: Session, version: WorkPlanVersion, admins: List[User]) -> None:
+    order = len(version.signers or []) + 1
+    for admin in admins:
+        _add_signer_row(db, version.id, admin.id, order)
+        order += 1
+    db.flush()
+
+
+def _version_with_added_task(
+    db: Session,
+    plan: WorkPlan,
+    task: Task,
+    *,
+    created_by: int,
+) -> WorkPlanVersion:
+    """Deja un draft que incluye la actividad nueva. No hace commit."""
+    if plan.status == STATUS_PENDING:
+        plan.status = STATUS_DRAFT
+        if plan.current_version_id:
+            _append_event(
+                db,
+                version_id=plan.current_version_id,
+                event_type="cancelled",
+                user_id=created_by,
+                details="Se reabre el plan para agregar una actividad",
+            )
+
+    if plan.status in (STATUS_SIGNED, STATUS_REJECTED):
+        prev = _load_version(db, plan.current_version_id)
+        max_num = (
+            db.query(func.max(WorkPlanVersion.version_number))
+            .filter(WorkPlanVersion.work_plan_id == plan.id)
+            .scalar()
+            or 0
+        )
+        version = WorkPlanVersion(
+            work_plan_id=plan.id,
+            version_number=max_num + 1,
+            created_by=created_by,
+        )
+        db.add(version)
+        db.flush()
+        previous_ids = [row.task_id for row in (prev.tasks or [])]
+        if task.id not in previous_ids:
+            previous_ids.append(task.id)
+        rows = (
+            db.query(Task)
+            .options(joinedload(Task.unit))
+            .filter(Task.id.in_(previous_ids), Task.obra_id == plan.obra_id)
+            .all()
+        )
+        by_id = {row.id: row for row in rows}
+        for task_id in previous_ids:
+            current = by_id.get(task_id)
+            if not current:
+                continue
+            if current.id == task.id:
+                current.planned_start_date = plan.start_date
+                current.planned_end_date = plan.end_date
+            db.add(_snapshot_from_task(db, version_id=version.id, task=current))
+        order = 1
+        for signer in prev.signers or []:
+            _add_signer_row(db, version.id, signer.user_id, signer.signature_order or order)
+            order += 1
+        plan.current_version_id = version.id
+        plan.status = STATUS_DRAFT
+        _append_event(
+            db,
+            version_id=version.id,
+            event_type="created",
+            user_id=created_by,
+            details=f"Nueva versión {version.version_number} por una actividad agregada",
+        )
+        db.flush()
+        return _load_version(db, version.id)
+
+    version = _load_version(db, plan.current_version_id)
+    if not version:
+        raise WorkPlanValidationError("El plan no tiene versión para agregar la actividad")
+    already = any(row.task_id == task.id for row in (version.tasks or []))
+    if not already:
+        task.planned_start_date = plan.start_date
+        task.planned_end_date = plan.end_date
+        loaded = (
+            db.query(Task)
+            .options(joinedload(Task.unit))
+            .filter(Task.id == task.id)
+            .first()
+        )
+        db.add(_snapshot_from_task(db, version_id=version.id, task=loaded or task))
+        db.flush()
+    plan.status = STATUS_DRAFT
+    return _load_version(db, version.id)
+
+
+async def add_activity_to_period(
+    db: Session,
+    data: TaskAddToPeriod,
+    *,
+    created_by: int,
+) -> Dict[str, Any]:
+    justification = data.justification.strip()
+    if len(justification) < 8:
+        raise WorkPlanValidationError("Escribe la justificación de la actividad.")
+
+    plan = _period_plan(db, data.obra_id)
+    if not plan:
+        raise WorkPlanValidationError(
+            "Esta obra no tiene un periodo de planificación. "
+            "Crea el plan antes de agregar actividades."
+        )
+
+    if data.template_id:
+        task = add_task_from_catalog(
+            db,
+            TaskCreateFromTemplate(
+                obra_id=data.obra_id,
+                template_id=data.template_id,
+                name=data.name,
+                description=data.description,
+                planned_start_date=plan.start_date,
+                planned_end_date=plan.end_date,
+                copy_subtasks=False,
+                instantiate_dependencies=False,
+            ),
+            created_by=created_by,
+        )
+    else:
+        task = add_unique_obra_task(
+            db,
+            obra_id=data.obra_id,
+            name=data.name or "",
+            description=data.description,
+            planned_start_date=plan.start_date,
+            planned_end_date=plan.end_date,
+            created_by=created_by,
+        )
+
+    admins = _admin_users(db)
+    if not admins:
+        raise WorkPlanValidationError(
+            "No hay administradores activos para avisar y firmar."
+        )
+
+    version = _version_with_added_task(db, plan, task, created_by=created_by)
+    _ensure_admin_signers(db, version, admins)
+    version_id = version.id
+    db.flush()
+    db.expire(version)
+    version = _load_version(db, version_id)
+    if not version or not version.signers:
+        raise WorkPlanValidationError("No quedó ningún firmante para el plan.")
+
+    plan.status = STATUS_PENDING
+    plan.requested_by = created_by
+    detail = f"Se añadió «{task.name}». Justificación: {justification}"
+    _append_event(
+        db,
+        version_id=version.id,
+        event_type="requested",
+        user_id=created_by,
+        details=detail,
+    )
+    link = f"/dashboard/planes/{plan.id}"
+    for admin in admins:
+        db.add(
+            UserNotification(
+                user_id=admin.id,
+                title=f"Firma pendiente · {plan.name}",
+                body=detail,
+                link=link,
+            )
+        )
+    db.commit()
+    return {
+        "task": task_to_dict(await get_task(db, task.id)),
+        "work_plan": plan_to_dict(await get_plan(db, plan.id)),
+        "justification": justification,
+    }
 
 
 async def request_signatures(

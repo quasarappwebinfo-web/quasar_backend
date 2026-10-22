@@ -42,11 +42,17 @@ def _boto():
 def get_s3_client() -> Any:
     _require_s3_config()
     boto3, _, _ = _boto()
+    from botocore.config import Config
+
     return boto3.client(
         "s3",
         region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
     )
 
 
@@ -130,14 +136,14 @@ def presigned_get_url(key: str, expires_in: Optional[int] = None) -> str:
 
 def resolve_media_url(key: Optional[str]) -> Optional[str]:
     """
-    Por defecto URL firmada (bucket privado → el <img> del front sí carga).
-    Si S3_USE_PRESIGNED_URLS=false y hay base pública + policy de lectura → URL estable.
+    URL firmada para que el <img> cargue aunque el bucket sea privado.
+    Si firmar falla, cae a la URL pública.
     """
     if not key:
         return None
-    if settings.s3_use_presigned_urls:
-        try:
-            return presigned_get_url(key)
-        except Exception:
-            return public_object_url(key)
-    return public_object_url(key)
+    if key.startswith("http"):
+        return key
+    try:
+        return presigned_get_url(key)
+    except Exception:
+        return public_object_url(key)

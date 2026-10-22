@@ -239,9 +239,9 @@ El objetivo es evitar que cada supervisor tenga que crear manualmente desde cero
 
 ---
 
-# 8. Categorías del Task Pool
+# 8. Capítulos del Task Pool
 
-Las tareas del Task Pool deben organizarse mediante categorías.
+Las tareas del Task Pool deben organizarse mediante capítulos.
 
 Ejemplos:
 
@@ -256,9 +256,9 @@ Ejemplos:
 - Exteriores.
 - Entrega.
 
-Las categorías son importantes tanto para la organización del sistema como para la experiencia de usuario.
+Los capítulos son importantes tanto para la organización del sistema como para la experiencia de usuario.
 
-Una actividad pertenece a una categoría.
+Una actividad pertenece a un capítulo.
 
 
 ---

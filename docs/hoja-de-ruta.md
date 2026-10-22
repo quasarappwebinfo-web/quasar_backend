@@ -154,13 +154,13 @@ Conocimiento reutilizable. **No son tareas de obra.**
 
 Doc frontend: [task-pool-frontend.md](./task-pool-frontend.md)
 
-### 5.1 Categorías (`task_categories`)
+### 5.1 Capítulos (`task_chapters`)
 
 - [x] CRUD con `display_order`
 
 ### 5.2 Plantillas (`task_templates`)
 
-- [x] CRUD: nombre, `code` único, categoría
+- [x] CRUD: nombre, `code` único, capítulo
 
 ### 5.3 Versiones (`task_template_versions`)
 
@@ -313,7 +313,7 @@ Contrato front: [`identidad-frontend.md`](identidad-frontend.md).
 | 4 | CRUD **Trabajadores** + asignaciones a obra |
 | 5 | CRUD **Cuadrillas** + miembros |
 | 6 | CRUD **Obras** + clientes + documentos |
-| 7 | **Task Pool**: categorías → plantillas → versiones (publicar inmutable) |
+| 7 | **Task Pool**: capítulos → plantillas → versiones (publicar inmutable) |
 | 8 | **Recomendación** de duración/recursos (solo sugiere) |
 | 9 | **Tareas** en obra (desde plantilla) + deps + asignaciones |
 | 10 | Estados, retrasos, reprogramaciones |

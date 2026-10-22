@@ -10,10 +10,10 @@ Un solo servidor. Cuatro sitios:
 Carpetas en el servidor:
 
 ```text
-/srv/quasar/staging/backend    # este repo
-/srv/quasar/staging/front      # build estático del front
+/srv/quasar/staging/backend     # quasar_backend
+/srv/quasar/staging/frontend    # quasar_frontend (Nginx sirve frontend/dist)
 /srv/quasar/prod/backend
-/srv/quasar/prod/front
+/srv/quasar/prod/frontend
 ```
 
 Puertos (solo localhost, Nginx es la puerta pública):
@@ -23,9 +23,18 @@ Puertos (solo localhost, Nginx es la puerta pública):
 | Pruebas | `8002` | `3309` |
 | Producción | `8003` | `3310` |
 
-En el SSH y el `rsync`, cambia `USUARIO` por el usuario con el que ya entras desde tu Mac.
+Repos (cuenta GitHub `quasarappwebinfo-web`):
 
-Docker ya está en el VPS. Todo lo de abajo, salvo el build del front, se corre **dentro** de esa sesión SSH.
+| | Repo | En el Mac (clave de Quasar, no la de JuCaMaL-T) |
+|--|------|--------------------------------------------------|
+| Backend | `quasar_backend` | `git@github.com-quasar:quasarappwebinfo-web/quasar_backend.git` |
+| Front | `quasar_frontend` | `git@github.com-quasar:quasarappwebinfo-web/quasar_frontend.git` |
+
+En el VPS no existe el alias `github.com-quasar`. Cada repo se clona con su propia deploy key: GitHub no acepta la misma clave en los dos repos.
+
+En el SSH, cambia `USUARIO` por el usuario con el que ya entras desde tu Mac.
+
+Docker ya está en el VPS. Todo lo de abajo se corre **dentro** de esa sesión SSH.
 
 ---
 
@@ -65,6 +74,8 @@ En el servidor:
 
 ```bash
 sudo apt update && sudo apt install -y git nginx certbot python3-certbot-nginx
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
 sudo ufw allow OpenSSH
 sudo ufw allow 80
 sudo ufw allow 443
@@ -75,13 +86,51 @@ sudo ufw enable
 
 ## 2. Código y variables
 
+Backend y front se clonan dos veces (pruebas y producción). Entra a GitHub con la cuenta `quasarappwebinfo-web` (no con JuCaMaL-T).
+
+Una clave por repo, las dos solo lectura:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_quasar -N ""
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_quasar_front -N ""
+cat ~/.ssh/id_ed25519_quasar.pub
+cat ~/.ssh/id_ed25519_quasar_front.pub
+```
+
+- La primera línea va en `quasar_backend` → Settings → Deploy keys.
+- La segunda va en `quasar_frontend` → Settings → Deploy keys.
+
+Si el backend ya clona con `~/.ssh/id_ed25519_quasar`, no regeneres esa clave: solo crea la del front y pégala en `quasar_frontend`.
+
+```bash
+cat >> ~/.ssh/config << 'EOF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_quasar
+  IdentitiesOnly yes
+
+Host github.com-front
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_quasar_front
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+```
+
 ```bash
 sudo mkdir -p /srv/quasar/staging /srv/quasar/prod
 sudo chown -R $USER:$USER /srv/quasar
 
-git clone URL_DEL_REPO /srv/quasar/staging/backend
-git clone URL_DEL_REPO /srv/quasar/prod/backend
-mkdir -p /srv/quasar/staging/front /srv/quasar/prod/front
+Pruebas usa la rama `develop`. Producción usa `main`.
+
+```bash
+git clone -b develop git@github.com:quasarappwebinfo-web/quasar_backend.git /srv/quasar/staging/backend
+git clone -b main git@github.com:quasarappwebinfo-web/quasar_backend.git /srv/quasar/prod/backend
+git clone -b develop git@github.com-front:quasarappwebinfo-web/quasar_frontend.git /srv/quasar/staging/frontend
+git clone -b main git@github.com-front:quasarappwebinfo-web/quasar_frontend.git /srv/quasar/prod/frontend
+```
 ```
 
 En **cada** clon, el Compose lee `.env`. Cópialo desde `.env.example` y cambia al menos esto.
@@ -165,7 +214,7 @@ sudo nano /etc/nginx/sites-available/quasar
 server {
     listen 80;
     server_name test.constructoraquasar.com;
-    root /srv/quasar/staging/front;
+    root /srv/quasar/staging/frontend/dist;
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -186,7 +235,7 @@ server {
 server {
     listen 80;
     server_name app.constructoraquasar.com;
-    root /srv/quasar/prod/front;
+    root /srv/quasar/prod/frontend/dist;
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -227,31 +276,53 @@ Certbot renueva solo. El front debe llamar a la API por `https://api-test...` o 
 
 ---
 
-## 6. Subir el front
+## 6. Construir el front
 
-En tu Mac, dentro del repo del frontend (Vite deja el build en `dist/`; si el tuyo es `build/`, cambia la carpeta).
+En el VPS. `VITE_API_URL` queda grabada en el build; cada entorno tiene la suya. `.env` no se sube a GitHub.
 
-Pruebas — la API del build debe ser `https://api-test.constructoraquasar.com`:
-
-```bash
-npm run build
-rsync -avz --delete dist/ USUARIO@2.25.255.157:/srv/quasar/staging/front/
-```
-
-Producción — la API del build debe ser `https://api.constructoraquasar.com`:
+Pruebas:
 
 ```bash
+cd /srv/quasar/staging/frontend
+printf 'VITE_API_URL=https://api-test.constructoraquasar.com\n' > .env
+npm ci
 npm run build
-rsync -avz --delete dist/ USUARIO@2.25.255.157:/srv/quasar/prod/front/
 ```
 
-No hace falta reiniciar Nginx: son archivos estáticos.
+Producción:
+
+```bash
+cd /srv/quasar/prod/frontend
+printf 'VITE_API_URL=https://api.constructoraquasar.com\n' > .env
+npm ci
+npm run build
+```
+
+Nginx sirve `frontend/dist`. No hace falta reiniciarlo. Si el sitio ya apuntaba a `/srv/quasar/staging/front` o `/srv/quasar/prod/front`, cambia esos `root` por `.../frontend/dist` y recarga Nginx.
 
 ---
 
 ## Día a día
 
-Siempre en el servidor, salvo el front (se construye en el Mac y se copia con `rsync`).
+Todo en el servidor. Pruebas está en `develop`; producción en `main`. `git pull` trae la rama que ya tiene cada carpeta.
+
+**Actualizar front de pruebas:**
+
+```bash
+cd /srv/quasar/staging/frontend
+git pull
+npm ci
+npm run build
+```
+
+**Actualizar front de producción:**
+
+```bash
+cd /srv/quasar/prod/frontend
+git pull
+npm ci
+npm run build
+```
 
 **Actualizar backend de pruebas** (el compose monta el código; si cambió `requirements.txt`, añade `--build`):
 

@@ -240,6 +240,21 @@ class TaskPhotoResponse(BaseResponseSchema):
     created_at: Optional[datetime] = None
 
 
+class TaskPhotoGalleryItem(BaseResponseSchema):
+    file_url: str
+    description: Optional[str] = None
+    taken_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    uploaded_by_name: Optional[str] = None
+    task_id: int
+    task_name: str
+    subtask_name: Optional[str] = None
+    chapter_id: Optional[int] = None
+    chapter_name: Optional[str] = None
+    budget_activity_id: Optional[int] = None
+    budget_activity_name: Optional[str] = None
+
+
 # --- Documents ---
 
 

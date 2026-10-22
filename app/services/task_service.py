@@ -18,6 +18,7 @@ from app.models import (
     Obra,
     Task,
     TaskAssignment,
+    TaskChapter,
     TaskComment,
     TaskCrewAssignment,
     TaskDailyAssignment,
@@ -34,7 +35,10 @@ from app.models import (
     TaskTemplateSubtask,
     TaskTemplateVersion,
     User,
+    UserNotification,
     Worker,
+    WorkPlan,
+    WorkPlanTask,
 )
 from app.schemas import (
     TaskAssignmentAdd,
@@ -56,6 +60,7 @@ from app.schemas.operacion.task_schema import (
     OVERRIDE_TYPES,
     TASK_STATUSES,
 )
+from app.core.db_timezone import get_colombia_now
 from app.services.s3_service import resolve_media_url
 
 STATUS_SCHEDULED = "scheduled"
@@ -148,40 +153,39 @@ def _user_display(user: Optional[User]) -> Optional[str]:
 
 
 def task_to_dict(row: Task, *, enrich: bool = True) -> Dict[str, Any]:
-    tpl = None
-    category_id = None
-    category_name = None
+    tpl = _catalog_template(row)
+    chapter_id = None
+    chapter_name = None
     zone_id = None
     zone_name = None
     budget_activity_id = None
     budget_activity_name = None
     template_code = None
     template_name = None
-    if row.source_template_version:
-        tpl = row.source_template_version.task_template
-        if tpl:
-            template_code = tpl.code
-            template_name = tpl.name
-            if tpl.category:
-                category_id = tpl.category.id
-                category_name = tpl.category.name
-            if tpl.zone:
-                zone_id = tpl.zone.id
-                zone_name = tpl.zone.name
-            if tpl.budget_activity:
-                budget_activity_id = tpl.budget_activity.id
-                budget_activity_name = tpl.budget_activity.name
+    if tpl:
+        template_code = tpl.code
+        template_name = tpl.name
+        if tpl.chapter:
+            chapter_id = tpl.chapter.id
+            chapter_name = tpl.chapter.name
+        if tpl.zone:
+            zone_id = tpl.zone.id
+            zone_name = tpl.zone.name
+        if tpl.budget_activity:
+            budget_activity_id = tpl.budget_activity.id
+            budget_activity_name = tpl.budget_activity.name
 
     data: Dict[str, Any] = {
         "id": row.id,
         "uuid": row.uuid,
         "obra_id": row.obra_id,
         "obra_name": row.obra.name if row.obra else None,
+        "source_template_id": row.source_template_id or (tpl.id if tpl else None),
         "source_template_version_id": row.source_template_version_id,
         "template_code": template_code,
         "template_name": template_name,
-        "category_id": category_id,
-        "category_name": category_name,
+        "chapter_id": chapter_id,
+        "chapter_name": chapter_name,
         "zone_id": zone_id,
         "zone_name": zone_name,
         "budget_activity_id": budget_activity_id,
@@ -489,10 +493,15 @@ def _task_load_options():
         joinedload(Task.unit),
         joinedload(Task.created_by_user).joinedload(User.person),
         joinedload(Task.updated_by_user).joinedload(User.person),
+        joinedload(Task.source_template).options(
+            joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
+            joinedload(TaskTemplate.zone),
+            joinedload(TaskTemplate.budget_activity),
+        ),
         joinedload(Task.source_template_version)
         .joinedload(TaskTemplateVersion.task_template)
         .options(
-            joinedload(TaskTemplate.category),
+            joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
             joinedload(TaskTemplate.zone),
             joinedload(TaskTemplate.budget_activity),
         ),
@@ -571,7 +580,7 @@ async def list_tasks(
     page: int = 1,
     obra_id: Optional[int] = None,
     status: Optional[str] = None,
-    category_id: Optional[int] = None,
+    chapter_id: Optional[int] = None,
     search: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
@@ -606,11 +615,11 @@ async def list_tasks(
             (Task.planned_start_date.is_(None))
             | (Task.planned_start_date <= date_to)
         )
-    if category_id is not None:
+    if chapter_id is not None:
         q = (
             q.join(Task.source_template_version)
             .join(TaskTemplateVersion.task_template)
-            .filter(TaskTemplate.category_id == category_id)
+            .filter(TaskTemplate.chapter_id == chapter_id)
             .distinct()
         )
 
@@ -631,7 +640,7 @@ async def list_board(
     db: Session,
     *,
     obra_id: int,
-    category_id: Optional[int] = None,
+    chapter_id: Optional[int] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
 ) -> Dict[str, Any]:
@@ -640,7 +649,7 @@ async def list_board(
         db,
         page=1,
         obra_id=obra_id,
-        category_id=category_id,
+        chapter_id=chapter_id,
         date_from=date_from,
         date_to=date_to,
         parent_only=True,
@@ -668,6 +677,275 @@ async def list_board(
             "rescheduled": len(columns[STATUS_RESCHEDULED]),
         },
     }
+
+
+def _progress_amount(value: Optional[Decimal]) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    return Decimal(str(value))
+
+
+def _task_progress_percent(task: Task) -> Decimal:
+    """0–100 de una actividad. Sin subtareas: 100 si está terminada."""
+    done = (STATUS_COMPLETED, STATUS_VERIFIED)
+    children = list(task.subtasks or [])
+    if children:
+        weights = [_progress_amount(c.weight_percent) for c in children]
+        total_w = sum(weights, Decimal("0"))
+        if total_w > 0:
+            done_w = sum(
+                (
+                    w
+                    for c, w in zip(children, weights)
+                    if c.status in done
+                ),
+                Decimal("0"),
+            )
+            return (done_w / total_w * 100).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        finished = sum(1 for c in children if c.status in done)
+        return (Decimal(finished) / Decimal(len(children)) * 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    if task.status in done:
+        return Decimal("100")
+    return Decimal("0")
+
+
+def _weighted_progress(
+    items: List[Tuple[Optional[Decimal], Decimal]],
+) -> Decimal:
+    """Promedio ponderado. Si nadie tiene peso, reparte por igual."""
+    if not items:
+        return Decimal("0")
+    if any(w is not None and Decimal(str(w)) > 0 for w, _ in items):
+        pairs = [(Decimal(str(w or 0)), p) for w, p in items]
+        total_w = sum((w for w, _ in pairs), Decimal("0"))
+        if total_w <= 0:
+            return Decimal("0")
+        acc = sum((w * p for w, p in pairs), Decimal("0"))
+        return (acc / total_w).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    acc = sum((p for _, p in items), Decimal("0"))
+    return (acc / Decimal(len(items))).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+
+
+def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
+    """Arma capítulos y el avance ponderado de un conjunto de actividades."""
+    chapters: Dict[Optional[int], Dict[str, Any]] = {}
+    for task in tasks:
+        template = _catalog_template(task)
+        chapter = template.chapter if template else None
+        activity = template.budget_activity if template else None
+        chapter_id = chapter.id if chapter else None
+        activity_id = activity.id if activity else None
+        chapter_bucket = chapters.setdefault(
+            chapter_id, {"chapter": chapter, "activities": {}}
+        )
+        activity_bucket = chapter_bucket["activities"].setdefault(
+            activity_id, {"activity": activity, "tasks": []}
+        )
+        activity_bucket["tasks"].append(task)
+
+    def _chapter_sort(item: Dict[str, Any]):
+        chapter = item["chapter"]
+        if chapter is None:
+            return (1, 0, "")
+        return (0, chapter.display_order or 0, chapter.name or "")
+
+    chapter_rows = []
+    stage_groups: Dict[int, Dict[str, Any]] = {}
+    loose: List[Tuple[Optional[Decimal], Decimal]] = []
+    for bucket in sorted(chapters.values(), key=_chapter_sort):
+        chapter = bucket["chapter"]
+        activity_rows = []
+        chapter_parts: List[Tuple[Optional[Decimal], Decimal]] = []
+        activities = sorted(
+            bucket["activities"].values(),
+            key=lambda b: (
+                1 if b["activity"] is None else 0,
+                0 if b["activity"] is None else (b["activity"].display_order or 0),
+                "" if b["activity"] is None else (b["activity"].name or ""),
+            ),
+        )
+        for activity_bucket in activities:
+            activity = activity_bucket["activity"]
+            progress = _weighted_progress(
+                [
+                    (
+                        (
+                            _catalog_template(t).budget_weight_percent
+                            if _catalog_template(t)
+                            else t.budget_weight_percent
+                        ),
+                        _task_progress_percent(t),
+                    )
+                    for t in activity_bucket["tasks"]
+                ]
+            )
+            weight = activity.chapter_weight_percent if activity else None
+            chapter_parts.append((weight, progress))
+            activity_rows.append(
+                {
+                    "budget_activity_id": activity.id if activity else None,
+                    "budget_activity_name": (
+                        activity.name if activity else "Sin actividad presupuestal"
+                    ),
+                    "weight_percent": weight,
+                    "progress_percent": progress,
+                }
+            )
+        chapter_progress = _weighted_progress(chapter_parts)
+        chapter_weight = chapter.weight_percent if chapter else None
+        if chapter is not None and chapter.stage_id:
+            group = stage_groups.setdefault(
+                chapter.stage_id,
+                {"stage": chapter.stage, "parts": []},
+            )
+            group["parts"].append((chapter_weight, chapter_progress))
+        else:
+            loose.append((chapter_weight, chapter_progress))
+        chapter_rows.append(
+            {
+                "chapter_id": chapter.id if chapter else None,
+                "chapter_name": chapter.name if chapter else "Sin capítulo",
+                "weight_percent": chapter_weight,
+                "progress_percent": chapter_progress,
+                "budget_activities": activity_rows,
+            }
+        )
+    obra_parts = list(loose)
+    for group in stage_groups.values():
+        stage = group["stage"]
+        obra_parts.append(
+            (
+                stage.weight_percent if stage is not None else None,
+                _weighted_progress(group["parts"]),
+            )
+        )
+    return {
+        "progress_percent": _weighted_progress(obra_parts),
+        "chapters": chapter_rows,
+    }
+
+
+def _activity_status(tasks: List[Task]) -> Dict[str, int]:
+    completed = sum(
+        1 for task in tasks if task.status in (STATUS_COMPLETED, STATUS_VERIFIED)
+    )
+    in_progress = sum(1 for task in tasks if task.status == STATUS_IN_PROGRESS)
+    pending = sum(
+        1
+        for task in tasks
+        if task.status in (STATUS_SCHEDULED, STATUS_RESCHEDULED)
+    )
+    return {
+        "completed": completed,
+        "in_progress": in_progress,
+        "pending": pending,
+        "total": len(tasks),
+    }
+
+
+def _period_plan(db: Session, obra_id: int) -> Optional[WorkPlan]:
+    """Plan que cubre hoy. Si ninguno cubre hoy, el más reciente."""
+    plans = db.query(WorkPlan).filter(WorkPlan.obra_id == obra_id).all()
+    if not plans:
+        return None
+    today = get_colombia_now().date()
+    covering = [
+        plan for plan in plans if plan.start_date <= today <= plan.end_date
+    ]
+    pool = covering or plans
+    rank = {
+        "signed": 0,
+        "pending_signature": 1,
+        "draft": 2,
+        "rejected": 3,
+    }
+    pool.sort(
+        key=lambda plan: (
+            rank.get(plan.status, 9),
+            -(plan.end_date.toordinal() if plan.end_date else 0),
+            -plan.id,
+        )
+    )
+    return pool[0]
+
+
+async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
+    """Avance de la obra por actividad presupuestal, por capítulo y global."""
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise TaskOpValidationError(f"Obra {obra_id} no existe")
+
+    tasks = (
+        db.query(Task)
+        .options(
+            joinedload(Task.subtasks),
+            joinedload(Task.source_template).options(
+                joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
+                joinedload(TaskTemplate.budget_activity),
+            ),
+            joinedload(Task.source_template_version)
+            .joinedload(TaskTemplateVersion.task_template)
+            .options(
+                joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
+                joinedload(TaskTemplate.budget_activity),
+            ),
+        )
+        .filter(Task.obra_id == obra_id, Task.parent_task_id.is_(None))
+        .all()
+    )
+    unique: List[Task] = []
+    seen = set()
+    for task in tasks:
+        if task.id in seen:
+            continue
+        seen.add(task.id)
+        unique.append(task)
+    tasks = unique
+    built = _chapters_from_tasks(tasks)
+    plan = _period_plan(db, obra_id)
+    period = None
+    status_tasks = tasks
+    if plan and plan.current_version_id:
+        period_ids = {
+            row[0]
+            for row in db.query(WorkPlanTask.task_id)
+            .filter(WorkPlanTask.work_plan_version_id == plan.current_version_id)
+            .all()
+        }
+        period_tasks = [task for task in tasks if task.id in period_ids]
+        period_built = _chapters_from_tasks(period_tasks)
+        status_tasks = period_tasks
+        period = {
+            "plan_id": plan.id,
+            "plan_name": plan.name,
+            "start_date": plan.start_date,
+            "end_date": plan.end_date,
+            "progress_percent": period_built["progress_percent"],
+        }
+
+    return {
+        "obra_id": obra_id,
+        "progress_percent": built["progress_percent"],
+        "chapters": built["chapters"],
+        "period": period,
+        "activity_status": _activity_status(status_tasks),
+    }
+
+
+def _catalog_template(task: Task) -> Optional[TaskTemplate]:
+    direct = getattr(task, "source_template", None)
+    if direct is not None:
+        return direct
+    version = task.source_template_version
+    if version is not None:
+        return version.task_template
+    return None
 
 
 def _primary_unit_id(db: Session, version_id: int) -> Optional[int]:
@@ -698,16 +976,75 @@ def _estimate_duration(
     return (base_days * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-async def create_task_from_template(
+def add_task_from_catalog(
     db: Session,
     data: TaskCreateFromTemplate,
     *,
     created_by: int,
 ) -> Task:
+    """Crea la tarea y hace flush. No hace commit.
+
+    Con solo `template_id` queda programada en las fechas pedidas, sin
+    cantidad, duración, subtareas ni dependencias.
+    """
     obra = db.query(Obra).filter(Obra.id == data.obra_id).first()
     if not obra:
         raise TaskOpValidationError(f"Obra {data.obra_id} no existe")
 
+    if data.source_template_version_id:
+        return _add_task_from_published_version(
+            db, data, created_by=created_by
+        )
+    if not data.template_id:
+        raise TaskOpValidationError(
+            "Indica la actividad registrada. La versión no es obligatoria."
+        )
+
+    tpl = (
+        db.query(TaskTemplate)
+        .filter(TaskTemplate.id == data.template_id, TaskTemplate.is_active == 1)
+        .first()
+    )
+    if not tpl:
+        raise TaskOpValidationError(
+            f"Actividad registrada {data.template_id} no existe o está inactiva"
+        )
+
+    uid = _new_uuid(data.uuid)
+    _assert_uuid_free(db, Task, uid, "Tarea")
+    task = Task(
+        uuid=uid,
+        obra_id=data.obra_id,
+        source_template_id=tpl.id,
+        source_template_version_id=None,
+        parent_task_id=None,
+        name=data.name or tpl.name,
+        description=data.description if data.description is not None else tpl.description,
+        planned_start_date=data.planned_start_date,
+        planned_end_date=data.planned_end_date,
+        status=STATUS_SCHEDULED,
+        budget_weight_percent=tpl.budget_weight_percent,
+        created_by=created_by,
+    )
+    db.add(task)
+    db.flush()
+    _append_history(
+        db,
+        task_id=task.id,
+        from_status=None,
+        to_status=STATUS_SCHEDULED,
+        changed_by=created_by,
+        reason="Registrada en el periodo, sin versión",
+    )
+    return task
+
+
+def _add_task_from_published_version(
+    db: Session,
+    data: TaskCreateFromTemplate,
+    *,
+    created_by: int,
+) -> Task:
     version = (
         db.query(TaskTemplateVersion)
         .options(
@@ -727,19 +1064,23 @@ async def create_task_from_template(
         raise TaskOpValidationError(
             f"Solo se crea desde versión published (actual: {version.status})"
         )
-    if not version.base_quantity or _dec(version.base_quantity) <= 0:
-        raise TaskOpValidationError("La versión no tiene baseQuantity válida")
-    if not version.base_duration_days or _dec(version.base_duration_days) <= 0:
-        raise TaskOpValidationError(
-            "La versión no tiene baseDurationDays válida"
-        )
 
     uid = _new_uuid(data.uuid)
     _assert_uuid_free(db, Task, uid, "Tarea")
 
-    base_q = _dec(version.base_quantity)
-    base_d = _dec(version.base_duration_days)
-    estimated = _estimate_duration(base_q, base_d, data.planned_quantity)
+    base_q = _dec(version.base_quantity) if version.base_quantity else None
+    base_d = (
+        _dec(version.base_duration_days) if version.base_duration_days else None
+    )
+    estimated = None
+    if (
+        data.planned_quantity
+        and base_q
+        and base_q > 0
+        and base_d
+        and base_d > 0
+    ):
+        estimated = _estimate_duration(base_q, base_d, data.planned_quantity)
     approved = (
         data.approved_duration_days
         if data.approved_duration_days is not None
@@ -752,6 +1093,7 @@ async def create_task_from_template(
     task = Task(
         uuid=uid,
         obra_id=data.obra_id,
+        source_template_id=tpl.id if tpl else None,
         source_template_version_id=version.id,
         parent_task_id=None,
         name=name,
@@ -808,6 +1150,16 @@ async def create_task_from_template(
     if data.instantiate_dependencies:
         _instantiate_template_deps(db, task, version, created_by=created_by)
 
+    return task
+
+
+async def create_task_from_template(
+    db: Session,
+    data: TaskCreateFromTemplate,
+    *,
+    created_by: int,
+) -> Task:
+    task = add_task_from_catalog(db, data, created_by=created_by)
     db.commit()
     return await get_task(db, task.id)
 
@@ -881,6 +1233,49 @@ def _instantiate_template_deps(
         )
 
 
+def add_unique_obra_task(
+    db: Session,
+    *,
+    obra_id: int,
+    name: str,
+    description: Optional[str],
+    planned_start_date,
+    planned_end_date,
+    created_by: int,
+) -> Task:
+    """Actividad que existe solo en esta obra. No entra al pool. No hace commit."""
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise TaskOpValidationError(f"Obra {obra_id} no existe")
+    cleaned = name.strip()
+    if not cleaned:
+        raise TaskOpValidationError("El nombre de la actividad es obligatorio.")
+    uid = _new_uuid(None)
+    _assert_uuid_free(db, Task, uid, "Tarea")
+    task = Task(
+        uuid=uid,
+        obra_id=obra_id,
+        parent_task_id=None,
+        name=cleaned,
+        description=description,
+        planned_start_date=planned_start_date,
+        planned_end_date=planned_end_date,
+        status=STATUS_SCHEDULED,
+        created_by=created_by,
+    )
+    db.add(task)
+    db.flush()
+    _append_history(
+        db,
+        task_id=task.id,
+        from_status=None,
+        to_status=STATUS_SCHEDULED,
+        changed_by=created_by,
+        reason="Actividad única de la obra",
+    )
+    return task
+
+
 async def create_task_manual(
     db: Session,
     data: TaskCreateManual,
@@ -900,10 +1295,6 @@ async def create_task_manual(
         if parent.obra_id != data.obra_id:
             raise TaskOpValidationError(
                 "La subtarea debe pertenecer a la misma obra que el padre"
-            )
-        if data.weight_percent is None:
-            raise TaskOpValidationError(
-                "Las subtareas requieren weightPercent (% hacia el 100% de la actividad)"
             )
 
     if data.unit_id is not None:
@@ -1552,6 +1943,50 @@ async def list_reschedules(
 # ---------- Comentarios / fotos ----------
 
 
+def _author_broadcasts_notes(user: Optional[User]) -> bool:
+    """Super admin y admins: sus notas se avisan al resto de usuarios."""
+    if not user or (user.is_active or 0) != 1:
+        return False
+    if (user.is_super or 0) == 1:
+        return True
+    role = getattr(user, "role", None)
+    name = (getattr(role, "name", None) or "").lower()
+    return "admin" in name
+
+
+def _notify_admin_note(db: Session, task: Task, content: str, author: User) -> None:
+    if not _author_broadcasts_notes(author):
+        return
+    recipients = (
+        db.query(User)
+        .filter(User.is_active == 1, User.id != author.id)
+        .all()
+    )
+    if not recipients:
+        return
+    author_name = _user_display(author) or "Administración"
+    obra_name = task.obra.name if task.obra else f"Obra {task.obra_id}"
+    text = (content or "").strip()
+    if len(text) > 400:
+        text = text[:397].rstrip() + "…"
+    title = f"Nota de {author_name}"
+    if len(title) > 255:
+        title = title[:252].rstrip() + "…"
+    body = f"{obra_name} · {task.name}\n{text}"
+    link = f"/dashboard/obras/{task.obra_id}/tareas?tarea={task.id}"
+    if len(link) > 255:
+        link = f"/dashboard/obras/{task.obra_id}/tareas"
+    for recipient in recipients:
+        db.add(
+            UserNotification(
+                user_id=recipient.id,
+                title=title,
+                body=body,
+                link=link,
+            )
+        )
+
+
 async def add_comment(
     db: Session,
     task_id: int,
@@ -1559,7 +1994,7 @@ async def add_comment(
     *,
     user_id: int,
 ) -> TaskComment:
-    await get_task(db, task_id)
+    task = await get_task(db, task_id)
     if data.type not in COMMENT_TYPES:
         raise TaskOpValidationError(
             f"type inválido. Valores: {', '.join(COMMENT_TYPES)}"
@@ -1574,6 +2009,14 @@ async def add_comment(
         content=data.content,
     )
     db.add(row)
+    author = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.person))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if author:
+        _notify_admin_note(db, task, data.content, author)
     db.commit()
     return (
         db.query(TaskComment)
@@ -1697,6 +2140,107 @@ async def upload_task_photo(
     except Exception:
         delete_object(key)
         raise
+
+
+def _gallery_template(task: Task):
+    if getattr(task, "source_template", None) is not None:
+        return task.source_template
+    version = getattr(task, "source_template_version", None)
+    if version is not None and getattr(version, "task_template", None) is not None:
+        return version.task_template
+    return None
+
+
+async def list_obra_photo_gallery(
+    db: Session,
+    *,
+    obra_id: int,
+    chapter_id: Optional[int] = None,
+    budget_activity_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+    page: int = 1,
+    limit: int = 24,
+) -> Dict[str, Any]:
+    """Fotos de evidencia de una obra, de la más reciente a la más antigua."""
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise TaskOpNotFoundError(f"Obra {obra_id} no encontrada")
+
+    rows = (
+        db.query(TaskPhoto)
+        .join(Task, TaskPhoto.task_id == Task.id)
+        .options(
+            joinedload(TaskPhoto.uploaded_by_user).joinedload(User.person),
+            joinedload(TaskPhoto.task).joinedload(Task.parent),
+            joinedload(TaskPhoto.task)
+            .joinedload(Task.source_template)
+            .joinedload(TaskTemplate.chapter),
+            joinedload(TaskPhoto.task)
+            .joinedload(Task.source_template)
+            .joinedload(TaskTemplate.budget_activity),
+            joinedload(TaskPhoto.task)
+            .joinedload(Task.source_template_version)
+            .joinedload(TaskTemplateVersion.task_template)
+            .joinedload(TaskTemplate.chapter),
+            joinedload(TaskPhoto.task)
+            .joinedload(Task.source_template_version)
+            .joinedload(TaskTemplateVersion.task_template)
+            .joinedload(TaskTemplate.budget_activity),
+        )
+        .filter(Task.obra_id == obra_id)
+        .order_by(TaskPhoto.created_at.desc(), TaskPhoto.id.desc())
+        .all()
+    )
+
+    items: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        if row.id in seen:
+            continue
+        seen.add(row.id)
+        task = row.task
+        if task is None:
+            continue
+        template = _gallery_template(task)
+        chapter = template.chapter if template is not None else None
+        budget = template.budget_activity if template is not None else None
+        if chapter_id is not None and (chapter is None or chapter.id != chapter_id):
+            continue
+        if budget_activity_id is not None and (
+            budget is None or budget.id != budget_activity_id
+        ):
+            continue
+        if task_id is not None and task.id != task_id and task.parent_task_id != task_id:
+            continue
+        parent = task.parent
+        items.append(
+            {
+                "id": row.id,
+                "file_url": photo_to_dict(row)["file_url"],
+                "description": row.description,
+                "taken_at": row.taken_at,
+                "created_at": row.created_at,
+                "uploaded_by_name": _user_display(row.uploaded_by_user),
+                "task_id": parent.id if parent is not None else task.id,
+                "task_name": parent.name if parent is not None else task.name,
+                "subtask_name": task.name if parent is not None else None,
+                "chapter_id": chapter.id if chapter is not None else None,
+                "chapter_name": chapter.name if chapter is not None else None,
+                "budget_activity_id": budget.id if budget is not None else None,
+                "budget_activity_name": budget.name if budget is not None else None,
+            }
+        )
+
+    total = len(items)
+    start = max(page - 1, 0) * limit
+    return {
+        "photos": items[start : start + limit],
+        "pagination": {
+            "totalItems": total,
+            "itemsPerPage": limit,
+            "currentPage": page,
+        },
+    }
 
 
 async def list_photos(db: Session, task_id: int) -> List[Dict[str, Any]]:

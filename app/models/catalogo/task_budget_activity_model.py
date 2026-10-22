@@ -6,18 +6,18 @@ from app.db.base import Base
 
 
 class TaskBudgetActivity(Base):
-    """Actividad presupuestal ligada a una categoría (y opcionalmente zona).
+    """Actividad presupuestal ligada a un capítulo (y opcionalmente zona).
 
-    Ej.: categoría «Estructura» → actividad «Estructura metálica».
-    Los pesos los define el cliente: % hacia categoría y % hacia zona.
+    Ej.: capítulo «Estructura» → actividad «Estructura metálica».
+    Los pesos los define el cliente: % hacia capítulo y % hacia zona.
     """
 
     __tablename__ = "task_budget_activities"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    category_id = Column(
+    chapter_id = Column(
         Integer,
-        ForeignKey("task_categories.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        ForeignKey("task_chapters.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=True,
     )
     zone_id = Column(
@@ -28,14 +28,14 @@ class TaskBudgetActivity(Base):
     name = Column(String(150), nullable=False)
     description = Column(Text, nullable=True)
     display_order = Column(Integer, nullable=False)
-    # % que esta BA aporta al 100% de su categoría
-    category_weight_percent = Column(Numeric(6, 2), nullable=True)
+    # % que esta BA aporta al 100% de su capítulo
+    chapter_weight_percent = Column(Numeric(6, 2), nullable=True)
     # % que esta BA aporta al 100% de su zona
     zone_weight_percent = Column(Numeric(6, 2), nullable=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
-    category = relationship("TaskCategory", back_populates="budget_activities")
+    chapter = relationship("TaskChapter", back_populates="budget_activities")
     zone = relationship("TaskZone", back_populates="budget_activities")
     templates = relationship("TaskTemplate", back_populates="budget_activity")

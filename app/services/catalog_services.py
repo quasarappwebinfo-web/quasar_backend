@@ -54,7 +54,13 @@ DELAY_FIELDS = ("name", "description", "is_active")
 UNIT_FIELDS = ("name", "symbol", "is_active")
 DOC_TYPE_FIELDS = ("name", "description", "is_active")
 SALE_TYPE_FIELDS = ("name", "is_active")
-STAGE_FIELDS = ("name", "description", "display_order", "is_active")
+STAGE_FIELDS = (
+    "name",
+    "description",
+    "display_order",
+    "weight_percent",
+    "is_active",
+)
 
 
 def _ensure_worker_position(db: Session, payload: Dict[str, Any]) -> None:
