@@ -2,6 +2,7 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_ASISTENCIA
@@ -83,6 +84,37 @@ async def check_in(
         ).model_dump(by_alias=True)
     except svc.AsistenciaError as e:
         _err(e)
+
+
+@router.get(
+    "/asistencia/liquidacion",
+    summary="Excel de liquidación: días trabajados, dónde estuvo y valor día × días",
+)
+async def download_liquidacion(
+    date_from: date = Query(..., alias="dateFrom"),
+    date_to: date = Query(..., alias="dateTo"),
+    obra_id: Optional[int] = Query(None, alias="obraId"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_ASISTENCIA)),
+):
+    from app.services.liquidacion_excel import build_liquidacion_xlsx
+
+    _ = user_auth
+    try:
+        payload = build_liquidacion_xlsx(
+            db,
+            date_from=date_from,
+            date_to=date_to,
+            obra_id=obra_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    filename = f"liquidacion-{date_from.isoformat()}-{date_to.isoformat()}.xlsx"
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete(

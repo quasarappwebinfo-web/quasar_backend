@@ -63,6 +63,7 @@ Base: `/api/v1/planificacion/planes`
 | Acción | Método | Ruta |
 |--------|--------|------|
 | Listar | `GET` | `?obraId&status&search&page` → `workPlans` |
+| Pendientes | `GET` | `/pendientes?obraId` → actividades de periodos anteriores sin completar |
 | Crear | `POST` | `/` → `201` |
 | Detalle | `GET` | `/{id}` |
 | Editar cabecera | `PUT` | `/{id}` (solo draft) |
@@ -91,11 +92,20 @@ Base: `/api/v1/planificacion/planes`
   "name": "Semana 36 — Bellagio Casa 19",
   "startDate": "2026-09-01",
   "endDate": "2026-09-07",
-  "taskIds": [10, 11, 12]
+  "templateIds": [4, 8],
+  "taskIds": [10, 11]
 }
 ```
 
-Requisitos por tarea: `plannedStartDate` y `plannedEndDate` (si faltan → 400).
+| Campo | Al crear | Qué es |
+|-------|----------|--------|
+| `obraId`, `name`, `startDate`, `endDate` | **Obligatorio** | Periodo |
+| `templateIds` | Opcional | Actividades registradas que se crean en el periodo. No pide versión, cantidad ni rendimiento |
+| `taskIds` | Opcional | Actividades ya existentes. Si no están completadas ni verificadas, sus fechas pasan a este periodo |
+
+Hace falta al menos un id en `templateIds` o en `taskIds`.
+
+`GET /pendientes?obraId=` devuelve las actividades de periodos anteriores con status `scheduled`, `in_progress` o `rescheduled`. La pantalla del periodo nuevo las muestra para agregarlas.
 
 Crea:
 - Plan `draft`
@@ -136,6 +146,8 @@ Crea:
 - Exige ≥1 tarea y ≥1 firmante
 - `draft|rejected` → `pending_signature`
 - Evento `requested` (`requestedBy` = usuario actual)
+
+Si desde el tablero de la obra se agrega una actividad (`POST /api/v1/operacion/tareas/agregar-al-periodo`), el plan del periodo vigente vuelve a `pending_signature` aunque ya estuviera firmado: la versión firmada no se modifica y, si hacía falta, se abre otra versión. El evento `requested` guarda el texto «Se añadió «nombre». Justificación: …» y cada administrador recibe un aviso en `GET /api/v1/user/notificaciones`.
 
 ### Vista
 

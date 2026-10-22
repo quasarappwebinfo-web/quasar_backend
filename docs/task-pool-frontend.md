@@ -17,13 +17,13 @@ Paginación: 15 ítems/página (mismo shape que el resto del API).
 | Qué es | Qué no es |
 |--------|-----------|
 | Catálogo de plantillas versionadas | Tareas asignadas a una obra (eso es Fase 6) |
-| Reglas: cantidad base, duración base, cargos, unidades, subtareas, deps | Aprobación del supervisor |
+| Identidad de la actividad (capítulo, actividad presupuestal, nombre, código). Cantidad, tiempo, subtareas y cuadrillas son opcionales | Aprobación del supervisor |
 | El sistema **recomienda** | Nadie auto-aprueba aquí |
 
 Flujo mental:
 
 ```
-Categoría → Plantilla (code único) → Versión draft
+Capítulo → Plantilla (code único) → Versión draft
     → editar detalle (unidades, cargos, subtareas, deps)
     → Publicar (inmutable)
     → Recomendar(obraQuantity) → valores sugeridos
@@ -31,6 +31,22 @@ Categoría → Plantilla (code único) → Versión draft
 ```
 
 Cambios a una versión **published**: no se edita. Se crea una **nueva versión** (opcionalmente clonando con `copyFromVersionId`).
+
+### Cómo pintar cada campo
+
+En cada formulario de alta, marca el input según la columna **Al crear**:
+
+| Marca en UI | Significado |
+|-------------|-------------|
+| **Obligatorio** | Hay que enviarlo. Si falta o viene vacío, el API responde `422`. |
+| **Opcional** | Se puede omitir o mandar `null`. La pantalla no debe exigirlo. |
+| **Opcional, default N** | Si no se envía, el backend guarda `N`. No lo pidas en el formulario. |
+
+Reglas de producto para el pool:
+
+- La actividad se registra y se publica **sin** cantidades, tiempos, subtareas, cargos, unidades, dependencias ni cuadrillas. Esos bloques enteros son opcionales.
+- Si el usuario agrega una fila dentro de un bloque opcional, esa fila sí tiene sus propios campos obligatorios (están en la tabla de esa fila).
+- El `PUT` es parcial en todos los recursos: ningún campo es obligatorio. Envía solo lo que cambió. El `code` de la plantilla no se edita.
 
 ---
 
@@ -44,7 +60,7 @@ Cambios a una versión **published**: no se edita. Se crea una **nueva versión*
 
 Transiciones:
 
-- `draft` → `published` — `POST .../publicar` (exige `baseQuantity` y `baseDurationDays` > 0)
+- `draft` → `published` — `POST .../publicar` (no exige cantidades, tiempos, subtareas ni cuadrillas)
 - `published` → `archived` — `POST .../archivar`
 - No se archiva un `draft` (400)
 
@@ -54,8 +70,10 @@ Transiciones:
 
 | Ruta frontend | Pantalla | Contenido |
 |---------------|----------|-----------|
-| `/maestros/task-pool/categorias` | Categorías | CRUD + `displayOrder` |
-| `/maestros/task-pool/plantillas` | Listado plantillas | Filtro categoría, búsqueda, activo |
+| `/maestros/task-pool/etapas` | Etapas | El catálogo de etapas de obra. Obligatorio: nombre y orden. Opcional: descripción y `%` de la obra |
+| `/maestros/task-pool/capitulos` | Capítulos | CRUD. Obligatorio: nombre y etapa. Opcional: descripción, orden, `%` de la etapa |
+| `/maestros/task-pool/actividades-presupuestales` | Actividades presupuestales | CRUD. Obligatorio: capítulo y nombre. Opcional: zona, descripción, orden, `%` del capítulo |
+| `/maestros/task-pool/plantillas` | Listado plantillas | Filtro capítulo, búsqueda, activo |
 | `/maestros/task-pool/plantillas/:id` | Detalle plantilla | Meta + listado de versiones |
 | `/maestros/task-pool/versiones/:versionId` | Editor de versión | Cabecera + tabs detalle; botones Publicar / Archivar / Nueva versión |
 | (modal / drawer) | Recomendar | Input cantidad obra → duración y cargos sugeridos |
@@ -70,15 +88,15 @@ Base común: `/api/v1/catalogo`
 
 | Recurso | Método | Ruta | Notas |
 |---------|--------|------|-------|
-| Categorías | `GET` | `/categorias-tarea` | `?page&search&activeOnly` → `categories` |
-| | `POST` | `/categorias-tarea` | `201` |
-| | `GET` | `/categorias-tarea/{id}` | |
-| | `PUT` | `/categorias-tarea/{id}` | parcial + `isActive` |
+| Capítulos | `GET` | `/capitulos-tarea` | `?page&search&activeOnly` → `chapters` |
+| | `POST` | `/capitulos-tarea` | `201` |
+| | `GET` | `/capitulos-tarea/{id}` | |
+| | `PUT` | `/capitulos-tarea/{id}` | parcial + `isActive` |
 | Zonas | `GET` | `/zonas-tarea` | `?page&search&activeOnly` → `zones` |
-| | `POST`/`GET`/`PUT` | `/zonas-tarea[/{id}]` | igual que categorías |
+| | `POST`/`GET`/`PUT` | `/zonas-tarea[/{id}]` | igual que capítulos |
 | Act. presupuestal | `GET` | `/actividades-presupuestales` | → `budgetActivities` |
-| | `POST`/`GET`/`PUT` | `/actividades-presupuestales[/{id}]` | igual que categorías |
-| Plantillas | `GET` | `/plantillas` | `?page&search&categoryId&zoneId&budgetActivityId&activeOnly` → `templates` |
+| | `POST`/`GET`/`PUT` | `/actividades-presupuestales[/{id}]` | igual que capítulos |
+| Plantillas | `GET` | `/plantillas` | `?page&search&chapterId&zoneId&budgetActivityId&activeOnly` → `templates` |
 | | `POST` | `/plantillas` | `201`; `code` único |
 | | `GET` | `/plantillas/{id}` | |
 | | `PUT` | `/plantillas/{id}` | no cambia `code` |
@@ -103,19 +121,30 @@ Errores: `400` validación / status incorrecto · `404` no existe · `409` nombr
 
 ---
 
-## 5.1 Categorías (`task_categories`)
+## 5.1 Capítulos (`task_chapters`)
 
-Base: `/api/v1/catalogo/categorias-tarea`
+Base: `/api/v1/catalogo/capitulos-tarea`
 
 ### Crear
 
 ```json
 {
   "name": "Estructura",
+  "stageId": 1,
   "description": "Actividades estructurales",
-  "displayOrder": 10
+  "displayOrder": 10,
+  "weightPercent": 25
 }
 ```
+
+| Campo | Al crear | En el `PUT` | Qué es |
+|-------|----------|-------------|--------|
+| `name` | **Obligatorio** | Opcional | Nombre del capítulo. 1–150 caracteres |
+| `stageId` | **Obligatorio** | Opcional | Etapa de obra (`/api/v1/obras/etapas`) activa. El capítulo pertenece a esa etapa |
+| `description` | Opcional | Opcional | Texto libre |
+| `displayOrder` | Opcional, default `0` | Opcional | Orden en listados |
+| `weightPercent` | Opcional | Opcional | `%` del capítulo dentro del 100% de su etapa. El `%` de la etapa es el que aporta a la obra. `0`–`100` |
+| `isActive` | No se envía (el backend guarda `1`) | Opcional | `1` activo, `2` inactivo |
 
 ### Respuesta
 
@@ -123,24 +152,48 @@ Base: `/api/v1/catalogo/categorias-tarea`
 {
   "id": 1,
   "name": "Estructura",
+  "stageId": 1,
+  "stageName": "Estructura",
   "description": "Actividades estructurales",
   "displayOrder": 10,
+  "weightPercent": "25.00",
   "isActive": 1,
   "createdAt": "2026-03-18T12:00:00"
 }
 ```
 
-Lista: `{ "categories": [...], "pagination": { ... } }`.  
+Lista: `{ "chapters": [...], "pagination": { ... } }`.  
 Orden por defecto: `displayOrder` ASC, luego `name`.
 
 ---
 
 ## 5.1b Zonas (`task_zones`) y actividades presupuestales (`task_budget_activities`)
 
-Mismo patrón que categorías (nombre, descripción, orden, soft `isActive`).
+### Zona — `/api/v1/catalogo/zonas-tarea`
 
-- Zonas: `/api/v1/catalogo/zonas-tarea` — ámbito de la obra (Casa, Zona social, …).
-- Actividades: `/api/v1/catalogo/actividades-presupuestales` — rubro más fino, **siempre ligado a una categoría** (`categoryId`). Ej. categoría Estructura → actividad Estructura metálica.
+Ámbito de la obra (Casa, Zona social, …). No participa en el `%` de cumplimiento.
+
+| Campo | Al crear | En el `PUT` | Qué es |
+|-------|----------|-------------|--------|
+| `name` | **Obligatorio** | Opcional | 1–150 caracteres |
+| `description` | Opcional | Opcional | Texto libre |
+| `displayOrder` | Opcional, default `0` | Opcional | Orden |
+| `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
+
+### Actividad presupuestal — `/api/v1/catalogo/actividades-presupuestales`
+
+Rubro dentro de un capítulo. Ejemplo: capítulo Estructura → actividad Estructura metálica.
+
+| Campo | Al crear | En el `PUT` | Qué es |
+|-------|----------|-------------|--------|
+| `chapterId` | **Obligatorio** | Opcional | Capítulo al que pertenece. Tiene que existir y estar activo |
+| `name` | **Obligatorio** | Opcional | 1–150 caracteres. Único dentro del mismo capítulo |
+| `zoneId` | Opcional | Opcional | Zona. Se puede dejar vacía |
+| `description` | Opcional | Opcional | Texto libre |
+| `displayOrder` | Opcional, default `0` | Opcional | Orden |
+| `chapterWeightPercent` | Opcional | Opcional | `%` de cumplimiento de esta actividad dentro del 100% de su capítulo. `0`–`100` |
+| `zoneWeightPercent` | Opcional | Opcional | `%` que aporta al 100% de su zona. `0`–`100`. No hace falta para el avance global |
+| `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
 Migración: `007_task_zone_budget_activity`.
 
@@ -156,7 +209,7 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
 
 ```json
 {
-  "categoryId": 1,
+  "chapterId": 1,
   "zoneId": 2,
   "budgetActivityId": 3,
   "name": "Vaciado de losa",
@@ -165,17 +218,24 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
 }
 ```
 
-- `code` único (409 si se repite).
-- `categoryId`, `zoneId` y `budgetActivityId` obligatorios al crear (catálogos activos).
-- `PUT` puede cambiar categoría, zona, actividad, nombre, descripción, `isActive`; **no** el `code`.
+| Campo | Al crear | En el `PUT` | Qué es |
+|-------|----------|-------------|--------|
+| `chapterId` | **Obligatorio** | Opcional | Capítulo activo |
+| `budgetActivityId` | **Obligatorio** | Opcional | Actividad presupuestal activa, y del mismo `chapterId` |
+| `name` | **Obligatorio** | Opcional | 1–255 caracteres |
+| `code` | **Obligatorio** | No se puede cambiar | Código único. Si se repite, `409` |
+| `zoneId` | Opcional | Opcional | Zona. La actividad se guarda sin zona |
+| `description` | Opcional | Opcional | Texto libre |
+| `budgetWeightPercent` | No se envía | No se envía | Lo calcula el backend: 100 dividido entre las actividades activas de esa actividad presupuestal. 1 actividad = 100, 2 = 50, 3 = 33.33. Al crear, mover o activar/desactivar una, se recalculan todas las de ese grupo |
+| `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
 ### Respuesta
 
 ```json
 {
   "id": 1,
-  "categoryId": 1,
-  "categoryName": "Estructura",
+  "chapterId": 1,
+  "chapterName": "Estructura",
   "zoneId": 2,
   "zoneName": "Casa",
   "budgetActivityId": 3,
@@ -183,6 +243,7 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
   "name": "Vaciado de losa",
   "code": "EST-LOSA-01",
   "description": "Vaciado de losa de concreto",
+  "budgetWeightPercent": "50.00",
   "isActive": 1,
   "createdAt": "2026-03-18T12:00:00"
 }
@@ -194,7 +255,7 @@ Filtros útiles:
 
 | Query | Uso |
 |--------|-----|
-| `categoryId` | Filtrar por categoría |
+| `chapterId` | Filtrar por capítulo |
 | `activeOnly=true` | Selectors / pickers |
 | `search` | Nombre o código |
 
@@ -217,9 +278,17 @@ Base: `/api/v1/catalogo/plantillas-versiones`
 }
 ```
 
-- Si omites `versionNumber`, el backend asigna el siguiente entero de esa plantilla.
-- `copyFromVersionId`: clona unidades, cargos, subtareas y dependencias desde otra versión (útil al iterar).
-- Status inicial: siempre **`draft`**.
+| Campo | Al crear | En el `PUT` (solo `draft`) | Qué es |
+|-------|----------|----------------------------|--------|
+| `taskTemplateId` | **Obligatorio** | No se envía | Plantilla dueña de la versión |
+| `name` | **Obligatorio** | Opcional | 1–255 caracteres |
+| `versionNumber` | Opcional | No se envía | Si se omite, el backend pone el siguiente entero de esa plantilla |
+| `description` | Opcional | Opcional | Texto libre |
+| `baseQuantity` | Opcional | Opcional | Cantidad base. No hace falta para guardar ni para publicar |
+| `baseDurationDays` | Opcional | Opcional | Días base. No hace falta para guardar ni para publicar |
+| `copyFromVersionId` | Opcional | No se envía | Clona unidades, cargos, subtareas y dependencias de otra versión |
+
+Status inicial: siempre **`draft`**. Publicar no exige ninguno de los campos opcionales.
 
 ### Actualizar cabecera (solo draft)
 
@@ -266,10 +335,8 @@ Base: `/api/v1/catalogo/plantillas-versiones`
 Requisitos:
 
 - Status actual = `draft`
-- `baseQuantity` > 0
-- `baseDurationDays` > 0
 
-Tras publicar: **inmutable**. Cualquier `PUT` o `POST` de detalle → `400`.
+Cantidad, duración, subtareas, cargos y cuadrillas pueden ir vacíos. Tras publicar: **inmutable**. Cualquier `PUT` o `POST` de detalle → `400`.
 
 ### Archivar
 
@@ -299,9 +366,14 @@ Botón **Nueva versión**: `POST /plantillas-versiones` con `copyFromVersionId` 
 { "unitId": 3, "isPrimary": 1 }
 ```
 
-- `unitId` de `/api/v1/catalogo/unidades-medida` (activo).
-- Si `isPrimary: 1`, el backend desmarca las demás primarias de esa versión.
-- `DELETE /plantillas-versiones/unidades/{itemId}` → `204`
+Agregar una unidad es opcional. Si se agrega:
+
+| Campo | Al crear la fila | Qué es |
+|-------|------------------|--------|
+| `unitId` | **Obligatorio** | Unidad activa de `/api/v1/catalogo/unidades-medida` |
+| `isPrimary` | Opcional, default `0` | `1` la marca primaria y desmarca las demás de esa versión |
+
+`DELETE /plantillas-versiones/unidades/{itemId}` → `204`
 
 Respuesta ejemplo:
 
@@ -330,10 +402,16 @@ Respuesta ejemplo:
 }
 ```
 
-- `workerPositionId` de `/api/v1/rrhh/cargos`.
-- `specialtyId` opcional de `/api/v1/rrhh/especialidades` (debe ser activa; si la especialidad está ligada a un cargo, debe coincidir).
-- `quantity` > 0 (cantidad base de personas para la `baseQuantity` de la versión).
-- `DELETE /plantillas-versiones/cargos/{itemId}` → `204`
+Agregar un cargo es opcional. Si se agrega, esta fila sí pide cantidad:
+
+| Campo | Al crear la fila | En el `PUT` | Qué es |
+|-------|------------------|-------------|--------|
+| `workerPositionId` | **Obligatorio** | No se cambia | Cargo activo de `/api/v1/rrhh/cargos` |
+| `quantity` | **Obligatorio** | Opcional | Personas de ese cargo. Tiene que ser `> 0` |
+| `specialtyId` | Opcional | No se cambia | Especialidad activa. Si está ligada a un cargo, debe coincidir |
+| `isRequired` | Opcional, default `1` | Opcional | `1` o `0` |
+
+`DELETE /plantillas-versiones/cargos/{itemId}` → `204`
 
 ### Subtareas estándar (`task_template_subtasks`)
 
@@ -348,7 +426,18 @@ Respuesta ejemplo:
 }
 ```
 
-`PUT /plantillas-versiones/subtareas/{itemId}` — parcial.  
+Agregar una subtarea es opcional. Si se agrega:
+
+| Campo | Al crear la fila | En el `PUT` | Qué es |
+|-------|------------------|-------------|--------|
+| `name` | **Obligatorio** | Opcional | 1–255 caracteres |
+| `description` | Opcional | Opcional | Texto libre |
+| `displayOrder` | Opcional, default `0` | Opcional | Orden |
+| `isRequired` | Opcional, default `1` | Opcional | `1` o `0` |
+| `weightPercent` | Opcional | Opcional | `%` dentro de la actividad. `0`–`100`. Si no se envía, queda `0` |
+
+No hace falta que los `%` de las subtareas sumen 100 para publicar.
+
 `DELETE .../subtareas/{itemId}` → `204`.
 
 ### Dependencias entre plantillas (`task_template_dependencies`)
@@ -367,6 +456,16 @@ Importante: `dependsOnTemplateId` apunta a una **plantilla** (`task_templates.id
 }
 ```
 
+Agregar una dependencia es opcional. Si se agrega:
+
+| Campo | Al crear la fila | Qué es |
+|-------|------------------|--------|
+| `dependsOnTemplateId` | **Obligatorio** | Id de otra **plantilla**, no de una versión |
+| `dependencyType` | Opcional, default `finish_to_start` | Uno de los valores de abajo |
+| `isRequired` | Opcional, default `1` | `1` o `0` |
+| `blocksStart` | Opcional, default `1` | `1` o `0` |
+| `description` | Opcional | Texto libre |
+
 `dependencyType` válidos:
 
 | Valor | Significado típico |
@@ -377,6 +476,10 @@ Importante: `dependsOnTemplateId` apunta a una **plantilla** (`task_templates.id
 | `start_to_finish` | Raro; B termina tras inicio de A |
 
 `DELETE .../dependencias/{itemId}` → `204`.
+
+### Cuadrillas
+
+No hay alta de cuadrillas en el pool. No armes un campo obligatorio de cuadrilla en el formulario de la actividad. Si el detalle trae `preferredCrews`, muéstralo solo como lectura.
 
 ---
 
@@ -392,7 +495,12 @@ Solo versiones **`published`**.
 { "obraQuantity": 250, "targetDurationDays": 10 }
 ```
 
-`targetDurationDays` es opcional. La respuesta incluye la unidad primaria (`unitSymbol` / `unitName`).
+| Campo | Al pedir recomendación | Qué es |
+|-------|------------------------|--------|
+| `obraQuantity` | **Obligatorio** | Cantidad de la obra. `> 0`. Este llamado sí es un rendimiento: solo tiene sentido si la versión publicada tiene `baseQuantity` y `baseDurationDays` |
+| `targetDurationDays` | Opcional | Días objetivo. `> 0` si se envía |
+
+La respuesta incluye la unidad primaria (`unitSymbol` / `unitName`). Registrar o publicar la actividad no pasa por este endpoint.
 
 ### Fórmula
 
@@ -449,15 +557,16 @@ Ejemplo: base 100 m³ / 5 días / 4 personas; obra 250 m³ → factor `2.5` → 
 
 ## Flujo feliz (checklist QA frontend)
 
-1. Crear categoría con `displayOrder`.
-2. Crear plantilla con `code` único.
-3. Crear versión draft con `baseQuantity` / `baseDurationDays`.
-4. Agregar unidad primaria, 1–2 cargos, subtareas, una dependencia.
-5. **Publicar** la versión.
-6. Verificar que `PUT` cabecera y `POST` detalle fallan con 400.
-7. Llamar **recomendar** con una cantidad y validar el factor.
-8. Crear nueva versión con `copyFromVersionId` y comprobar que el detalle se clonó.
-9. Archivar la versión publicada anterior.
+1. Crear capítulo: solo el nombre es obligatorio. `weightPercent` es opcional.
+2. Crear actividad presupuestal: `chapterId` y nombre obligatorios. `chapterWeightPercent` es opcional.
+3. Crear plantilla: `chapterId`, `budgetActivityId`, `name` y `code` obligatorios. Zona opcional. `budgetWeightPercent` lo calcula el backend.
+4. Crear versión draft (cantidad y duración opcionales).
+5. El detalle (unidades, cargos, subtareas, cuadrillas) es opcional.
+6. **Publicar** la versión.
+7. Verificar que `PUT` cabecera y `POST` detalle fallan con 400.
+8. Llamar **recomendar** con una cantidad y validar el factor.
+9. Crear nueva versión con `copyFromVersionId` y comprobar que el detalle se clonó.
+10. Archivar la versión publicada anterior.
 
 ---
 
@@ -466,10 +575,9 @@ Ejemplo: base 100 m³ / 5 días / 4 personas; obra 250 m³ → factor `2.5` → 
 | Situación | HTTP | Mensaje típico |
 |-----------|------|----------------|
 | Editar versión published | 400 | Solo se puede editar una versión en draft |
-| Publicar sin bases | 400 | baseQuantity / baseDurationDays debe ser > 0 |
 | Recomendar draft | 400 | Solo se recomienda desde una versión published |
 | `code` plantilla duplicado | 409 | … |
-| Categoría / plantilla / versión inexistente | 404 | … |
+| Capítulo / plantilla / versión inexistente | 404 | … |
 | Archivar draft | 400 | No archives un draft… |
 
 ---

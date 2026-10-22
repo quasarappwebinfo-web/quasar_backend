@@ -24,6 +24,7 @@ from app.schemas import (
     WorkPlanUpdate,
     WorkPlanVersionResponse,
 )
+from app.schemas.planificacion.work_plan_schema import UnfinishedPlanActivity
 from app.services import work_plan_service as svc
 
 router = APIRouter(prefix="/api/v1/planificacion/planes", tags=["planificacion"])
@@ -82,6 +83,27 @@ async def create_plan(
     try:
         row = await svc.create_plan(db, data, requested_by=user_auth.id)
         return _plan(svc.plan_to_dict(row))
+    except svc.WorkPlanError as e:
+        _err(e)
+
+
+@router.get(
+    "/pendientes",
+    summary="Actividades de periodos anteriores que no se completaron",
+)
+async def list_unfinished(
+    obra_id: int = Query(..., alias="obraId"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
+):
+    _ = user_auth
+    try:
+        rows = await svc.list_unfinished_activities(db, obra_id)
+        return {
+            "tasks": [
+                UnfinishedPlanActivity(**row).model_dump(by_alias=True) for row in rows
+            ]
+        }
     except svc.WorkPlanError as e:
         _err(e)
 

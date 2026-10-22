@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db, require_permission
+from app.models.identidad.user_notification_model import UserNotification
 from app.core.permissions import (
     PERMISSION_IDENTIDAD,
     catalog_as_list,
@@ -260,3 +261,94 @@ async def list_active_roles_endpoint(
     # No ofrecer super_admin en selects de alta
     roles = [r for r in roles if r["name"] != "super_admin"]
     return {"roles": roles}
+
+
+def _notification_dict(row: UserNotification) -> dict:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "body": row.body,
+        "link": row.link,
+        "readAt": row.read_at.isoformat() if row.read_at else None,
+        "createdAt": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@router.get("/notificaciones", summary="Avisos del usuario autenticado")
+async def list_my_notifications(
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(UserNotification)
+        .filter(UserNotification.user_id == user_auth.id)
+        .order_by(UserNotification.id.desc())
+        .limit(20)
+        .all()
+    )
+    unread = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.user_id == user_auth.id,
+            UserNotification.read_at.is_(None),
+        )
+        .count()
+    )
+    return {
+        "notifications": [_notification_dict(row) for row in rows],
+        "unread": unread,
+    }
+
+
+@router.post(
+    "/notificaciones/leidas",
+    summary="Marcar todos los avisos del usuario como leídos",
+)
+async def mark_all_notifications_read(
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(get_current_user),
+):
+    from app.core.db_timezone import get_colombia_now
+
+    now = get_colombia_now()
+    rows = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.user_id == user_auth.id,
+            UserNotification.read_at.is_(None),
+        )
+        .all()
+    )
+    for row in rows:
+        row.read_at = now
+    if rows:
+        db.commit()
+    return {"marked": len(rows)}
+
+
+@router.post(
+    "/notificaciones/{notification_id}/leida",
+    summary="Marcar un aviso como leído",
+)
+async def mark_notification_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(get_current_user),
+):
+    from app.core.db_timezone import get_colombia_now
+
+    row = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.id == notification_id,
+            UserNotification.user_id == user_auth.id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aviso no encontrado")
+    if row.read_at is None:
+        row.read_at = get_colombia_now()
+        db.commit()
+        db.refresh(row)
+    return _notification_dict(row)

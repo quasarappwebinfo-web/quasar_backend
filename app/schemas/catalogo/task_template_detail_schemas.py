@@ -95,11 +95,11 @@ class TaskTemplateSubtaskCreate(BaseCreateSchema):
     description: Optional[str] = None
     display_order: int = 0
     is_required: int = 1
-    weight_percent: Decimal = Field(
-        ...,
+    weight_percent: Optional[Decimal] = Field(
+        None,
         ge=0,
         le=100,
-        description="% que aporta al 100% de la actividad",
+        description="% que aporta al 100% de la actividad. Opcional.",
     )
 
 
@@ -108,11 +108,11 @@ class TaskTemplateSubtaskAdd(BaseCreateSchema):
     description: Optional[str] = None
     display_order: int = 0
     is_required: int = 1
-    weight_percent: Decimal = Field(
-        ...,
+    weight_percent: Optional[Decimal] = Field(
+        None,
         ge=0,
         le=100,
-        description="% que aporta al 100% de la actividad",
+        description="% que aporta al 100% de la actividad. Opcional.",
     )
 
 

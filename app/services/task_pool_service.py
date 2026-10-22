@@ -14,9 +14,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import (
     Crew,
     MeasurementUnit,
+    ObraStage,
     Specialty,
     TaskBudgetActivity,
-    TaskCategory,
+    TaskChapter,
     TaskTemplate,
     TaskTemplateCrew,
     TaskTemplateDependency,
@@ -30,8 +31,8 @@ from app.models import (
 from app.schemas import (
     TaskBudgetActivityCreate,
     TaskBudgetActivityUpdate,
-    TaskCategoryCreate,
-    TaskCategoryUpdate,
+    TaskChapterCreate,
+    TaskChapterUpdate,
     TaskTemplateCreate,
     TaskTemplateDependencyAdd,
     TaskTemplateMeasurementAdd,
@@ -74,15 +75,25 @@ class TaskPoolValidationError(TaskPoolError):
 # ---------- helpers dict ----------
 
 
-def category_to_dict(row: TaskCategory) -> Dict[str, Any]:
+def chapter_to_dict(row: TaskChapter) -> Dict[str, Any]:
     return {
         "id": row.id,
         "name": row.name,
+        "stage_id": row.stage_id,
+        "stage_name": row.stage.name if row.stage else None,
         "description": row.description,
         "display_order": row.display_order,
+        "weight_percent": row.weight_percent,
         "is_active": row.is_active,
         "created_at": row.created_at,
     }
+
+
+def _active_stage(db: Session, stage_id: int) -> ObraStage:
+    stage = db.query(ObraStage).filter(ObraStage.id == stage_id).first()
+    if not stage or stage.is_active != 1:
+        raise TaskPoolValidationError("La etapa no existe o está inactiva.")
+    return stage
 
 
 def zone_to_dict(row: TaskZone) -> Dict[str, Any]:
@@ -99,14 +110,14 @@ def zone_to_dict(row: TaskZone) -> Dict[str, Any]:
 def budget_activity_to_dict(row: TaskBudgetActivity) -> Dict[str, Any]:
     return {
         "id": row.id,
-        "category_id": row.category_id,
-        "category_name": row.category.name if row.category else None,
+        "chapter_id": row.chapter_id,
+        "chapter_name": row.chapter.name if row.chapter else None,
         "zone_id": row.zone_id,
         "zone_name": row.zone.name if row.zone else None,
         "name": row.name,
         "description": row.description,
         "display_order": row.display_order,
-        "category_weight_percent": row.category_weight_percent,
+        "chapter_weight_percent": row.chapter_weight_percent,
         "zone_weight_percent": row.zone_weight_percent,
         "is_active": row.is_active,
         "created_at": row.created_at,
@@ -116,8 +127,8 @@ def budget_activity_to_dict(row: TaskBudgetActivity) -> Dict[str, Any]:
 def template_to_dict(row: TaskTemplate) -> Dict[str, Any]:
     return {
         "id": row.id,
-        "category_id": row.category_id,
-        "category_name": row.category.name if row.category else None,
+        "chapter_id": row.chapter_id,
+        "chapter_name": row.chapter.name if row.chapter else None,
         "zone_id": row.zone_id,
         "zone_name": row.zone.name if row.zone else None,
         "budget_activity_id": row.budget_activity_id,
@@ -243,17 +254,20 @@ def _require_draft(version: TaskTemplateVersion) -> None:
         )
 
 
-# ---------- Categorías ----------
+# ---------- Capítulos ----------
 
 
-async def create_category(db: Session, data: TaskCategoryCreate) -> TaskCategory:
-    exists = db.query(TaskCategory).filter(TaskCategory.name == data.name).first()
+async def create_chapter(db: Session, data: TaskChapterCreate) -> TaskChapter:
+    exists = db.query(TaskChapter).filter(TaskChapter.name == data.name).first()
     if exists:
-        raise TaskPoolConflictError(f"Ya existe categoría '{data.name}'")
-    row = TaskCategory(
+        raise TaskPoolConflictError(f"Ya existe capítulo '{data.name}'")
+    _active_stage(db, data.stage_id)
+    row = TaskChapter(
         name=data.name,
+        stage_id=data.stage_id,
         description=data.description,
         display_order=data.display_order,
+        weight_percent=data.weight_percent,
         is_active=1,
     )
     db.add(row)
@@ -262,53 +276,55 @@ async def create_category(db: Session, data: TaskCategoryCreate) -> TaskCategory
     return row
 
 
-async def get_category(db: Session, item_id: int) -> TaskCategory:
-    row = db.query(TaskCategory).filter(TaskCategory.id == item_id).first()
+async def get_chapter(db: Session, item_id: int) -> TaskChapter:
+    row = db.query(TaskChapter).filter(TaskChapter.id == item_id).first()
     if not row:
-        raise TaskPoolNotFoundError(f"Categoría {item_id} no encontrada")
+        raise TaskPoolNotFoundError(f"Capítulo {item_id} no encontrado")
     return row
 
 
-async def list_categories(
+async def list_chapters(
     db: Session,
     page: int = 1,
     search: Optional[str] = None,
     active_only: bool = False,
 ) -> Dict[str, Any]:
     limit = 15
-    q = db.query(TaskCategory)
+    q = db.query(TaskChapter).options(joinedload(TaskChapter.stage))
     if active_only:
-        q = q.filter(TaskCategory.is_active == 1)
+        q = q.filter(TaskChapter.is_active == 1)
     if search:
-        q = q.filter(TaskCategory.name.ilike(f"%{search.strip()}%"))
+        q = q.filter(TaskChapter.name.ilike(f"%{search.strip()}%"))
     total = q.count()
     rows = (
-        q.order_by(TaskCategory.display_order.asc(), TaskCategory.name.asc())
+        q.order_by(TaskChapter.display_order.asc(), TaskChapter.name.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
     )
     return {
-        "categories": [category_to_dict(r) for r in rows],
+        "chapters": [chapter_to_dict(r) for r in rows],
         "pagination": _pagination(total, page, limit),
     }
 
 
-async def update_category(
-    db: Session, item_id: int, data: TaskCategoryUpdate
-) -> TaskCategory:
-    row = await get_category(db, item_id)
+async def update_chapter(
+    db: Session, item_id: int, data: TaskChapterUpdate
+) -> TaskChapter:
+    row = await get_chapter(db, item_id)
     payload = data.model_dump(exclude_unset=True)
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
+    if "stage_id" in payload and payload["stage_id"] is not None:
+        _active_stage(db, payload["stage_id"])
     if "name" in payload and payload["name"] != row.name:
         conflict = (
-            db.query(TaskCategory)
-            .filter(TaskCategory.name == payload["name"], TaskCategory.id != item_id)
+            db.query(TaskChapter)
+            .filter(TaskChapter.name == payload["name"], TaskChapter.id != item_id)
             .first()
         )
         if conflict:
-            raise TaskPoolConflictError(f"Ya existe categoría '{payload['name']}'")
+            raise TaskPoolConflictError(f"Ya existe capítulo '{payload['name']}'")
     for k, v in payload.items():
         setattr(row, k, v)
     db.commit()
@@ -395,8 +411,10 @@ async def update_zone(
 async def create_budget_activity(
     db: Session, data: TaskBudgetActivityCreate
 ) -> TaskBudgetActivity:
-    cat = db.query(TaskCategory).filter(TaskCategory.id == data.category_id).first()
-    _require_active_catalog(label="categoría", row=cat, item_id=data.category_id)
+    cat = db.query(TaskChapter).filter(TaskChapter.id == data.chapter_id).first()
+    _require_active_catalog(
+        label="capítulo", row=cat, item_id=data.chapter_id, masculine=True
+    )
     zone = None
     if data.zone_id is not None:
         zone = db.query(TaskZone).filter(TaskZone.id == data.zone_id).first()
@@ -404,22 +422,22 @@ async def create_budget_activity(
     exists = (
         db.query(TaskBudgetActivity)
         .filter(
-            TaskBudgetActivity.category_id == data.category_id,
+            TaskBudgetActivity.chapter_id == data.chapter_id,
             TaskBudgetActivity.name == data.name,
         )
         .first()
     )
     if exists:
         raise TaskPoolConflictError(
-            f"Ya existe actividad presupuestal '{data.name}' en esa categoría"
+            f"Ya existe actividad presupuestal '{data.name}' en ese capítulo"
         )
     row = TaskBudgetActivity(
-        category_id=data.category_id,
+        chapter_id=data.chapter_id,
         zone_id=data.zone_id,
         name=data.name,
         description=data.description,
         display_order=data.display_order,
-        category_weight_percent=data.category_weight_percent,
+        chapter_weight_percent=data.chapter_weight_percent,
         zone_weight_percent=data.zone_weight_percent,
         is_active=1,
     )
@@ -428,7 +446,7 @@ async def create_budget_activity(
     return (
         db.query(TaskBudgetActivity)
         .options(
-            joinedload(TaskBudgetActivity.category),
+            joinedload(TaskBudgetActivity.chapter),
             joinedload(TaskBudgetActivity.zone),
         )
         .filter(TaskBudgetActivity.id == row.id)
@@ -440,7 +458,7 @@ async def get_budget_activity(db: Session, item_id: int) -> TaskBudgetActivity:
     row = (
         db.query(TaskBudgetActivity)
         .options(
-            joinedload(TaskBudgetActivity.category),
+            joinedload(TaskBudgetActivity.chapter),
             joinedload(TaskBudgetActivity.zone),
         )
         .filter(TaskBudgetActivity.id == item_id)
@@ -457,18 +475,18 @@ async def list_budget_activities(
     db: Session,
     page: int = 1,
     search: Optional[str] = None,
-    category_id: Optional[int] = None,
+    chapter_id: Optional[int] = None,
     active_only: bool = False,
 ) -> Dict[str, Any]:
     limit = 15
     q = db.query(TaskBudgetActivity).options(
-        joinedload(TaskBudgetActivity.category),
+        joinedload(TaskBudgetActivity.chapter),
         joinedload(TaskBudgetActivity.zone),
     )
     if active_only:
         q = q.filter(TaskBudgetActivity.is_active == 1)
-    if category_id is not None:
-        q = q.filter(TaskBudgetActivity.category_id == category_id)
+    if chapter_id is not None:
+        q = q.filter(TaskBudgetActivity.chapter_id == chapter_id)
     if search:
         q = q.filter(TaskBudgetActivity.name.ilike(f"%{search.strip()}%"))
     total = q.count()
@@ -494,15 +512,15 @@ async def update_budget_activity(
     payload = data.model_dump(exclude_unset=True)
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
-    if "category_id" in payload:
+    if "chapter_id" in payload:
         cat = (
-            db.query(TaskCategory)
-            .filter(TaskCategory.id == payload["category_id"])
+            db.query(TaskChapter)
+            .filter(TaskChapter.id == payload["chapter_id"])
             .first()
         )
         if not cat:
             raise TaskPoolValidationError(
-                f"No existe categoría {payload['category_id']}"
+                f"No existe capítulo {payload['chapter_id']}"
             )
     if "zone_id" in payload and payload["zone_id"] is not None:
         zone = (
@@ -514,13 +532,13 @@ async def update_budget_activity(
             raise TaskPoolValidationError(
                 f"No existe zona {payload['zone_id']}"
             )
-    next_category_id = payload.get("category_id", row.category_id)
+    next_chapter_id = payload.get("chapter_id", row.chapter_id)
     next_name = payload.get("name", row.name)
-    if next_name != row.name or next_category_id != row.category_id:
+    if next_name != row.name or next_chapter_id != row.chapter_id:
         conflict = (
             db.query(TaskBudgetActivity)
             .filter(
-                TaskBudgetActivity.category_id == next_category_id,
+                TaskBudgetActivity.chapter_id == next_chapter_id,
                 TaskBudgetActivity.name == next_name,
                 TaskBudgetActivity.id != item_id,
             )
@@ -528,7 +546,7 @@ async def update_budget_activity(
         )
         if conflict:
             raise TaskPoolConflictError(
-                f"Ya existe actividad presupuestal '{next_name}' en esa categoría"
+                f"Ya existe actividad presupuestal '{next_name}' en ese capítulo"
             )
     for k, v in payload.items():
         setattr(row, k, v)
@@ -540,21 +558,49 @@ def _require_active_catalog(
     label: str,
     row: Any,
     item_id: int,
+    masculine: bool = False,
 ) -> None:
     if not row:
         raise TaskPoolValidationError(f"No existe {label} {item_id}")
     if row.is_active != 1:
-        raise TaskPoolValidationError(f"La {label} está inactiva")
+        article = "El" if masculine else "La"
+        state = "inactivo" if masculine else "inactiva"
+        raise TaskPoolValidationError(f"{article} {label} está {state}")
+
+
+def _share_budget_weights(db: Session, budget_activity_id: Optional[int]) -> None:
+    """Reparte el 100% de la actividad presupuestal en partes iguales.
+
+    1 actividad → 100, 2 → 50, 3 → 33.33. Las inactivas quedan en 0.
+    """
+    if budget_activity_id is None:
+        return
+    rows = (
+        db.query(TaskTemplate)
+        .filter(TaskTemplate.budget_activity_id == budget_activity_id)
+        .all()
+    )
+    active = [row for row in rows if row.is_active == 1]
+    share = None
+    if active:
+        share = (Decimal("100") / Decimal(len(active))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    for row in rows:
+        row.budget_weight_percent = share if row.is_active == 1 else Decimal("0")
 
 
 # ---------- Plantillas ----------
 
 
 async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate:
-    cat = db.query(TaskCategory).filter(TaskCategory.id == data.category_id).first()
-    _require_active_catalog(label="categoría", row=cat, item_id=data.category_id)
-    zone = db.query(TaskZone).filter(TaskZone.id == data.zone_id).first()
-    _require_active_catalog(label="zona", row=zone, item_id=data.zone_id)
+    cat = db.query(TaskChapter).filter(TaskChapter.id == data.chapter_id).first()
+    _require_active_catalog(
+        label="capítulo", row=cat, item_id=data.chapter_id, masculine=True
+    )
+    if data.zone_id is not None:
+        zone = db.query(TaskZone).filter(TaskZone.id == data.zone_id).first()
+        _require_active_catalog(label="zona", row=zone, item_id=data.zone_id)
     activity = (
         db.query(TaskBudgetActivity)
         .filter(TaskBudgetActivity.id == data.budget_activity_id)
@@ -565,29 +611,30 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         row=activity,
         item_id=data.budget_activity_id,
     )
-    if activity.category_id != data.category_id:
+    if activity.chapter_id != data.chapter_id:
         raise TaskPoolValidationError(
-            "La actividad presupuestal no pertenece a la categoría seleccionada"
+            "La actividad presupuestal no pertenece al capítulo seleccionado"
         )
     code = data.code.strip()
     if db.query(TaskTemplate).filter(TaskTemplate.code == code).first():
         raise TaskPoolConflictError(f"Ya existe plantilla con code='{code}'")
     row = TaskTemplate(
-        category_id=data.category_id,
+        chapter_id=data.chapter_id,
         zone_id=data.zone_id,
         budget_activity_id=data.budget_activity_id,
         name=data.name,
         code=code,
         description=data.description,
-        budget_weight_percent=data.budget_weight_percent,
         is_active=1,
     )
     db.add(row)
+    db.flush()
+    _share_budget_weights(db, data.budget_activity_id)
     db.commit()
     return (
         db.query(TaskTemplate)
         .options(
-            joinedload(TaskTemplate.category),
+            joinedload(TaskTemplate.chapter),
             joinedload(TaskTemplate.zone),
             joinedload(TaskTemplate.budget_activity),
         )
@@ -600,7 +647,7 @@ async def get_template(db: Session, item_id: int) -> TaskTemplate:
     row = (
         db.query(TaskTemplate)
         .options(
-            joinedload(TaskTemplate.category),
+            joinedload(TaskTemplate.chapter),
             joinedload(TaskTemplate.zone),
             joinedload(TaskTemplate.budget_activity),
         )
@@ -616,21 +663,21 @@ async def list_templates(
     db: Session,
     page: int = 1,
     search: Optional[str] = None,
-    category_id: Optional[int] = None,
+    chapter_id: Optional[int] = None,
     zone_id: Optional[int] = None,
     budget_activity_id: Optional[int] = None,
     active_only: bool = False,
 ) -> Dict[str, Any]:
     limit = 15
     q = db.query(TaskTemplate).options(
-        joinedload(TaskTemplate.category),
+        joinedload(TaskTemplate.chapter),
         joinedload(TaskTemplate.zone),
         joinedload(TaskTemplate.budget_activity),
     )
     if active_only:
         q = q.filter(TaskTemplate.is_active == 1)
-    if category_id is not None:
-        q = q.filter(TaskTemplate.category_id == category_id)
+    if chapter_id is not None:
+        q = q.filter(TaskTemplate.chapter_id == chapter_id)
     if zone_id is not None:
         q = q.filter(TaskTemplate.zone_id == zone_id)
     if budget_activity_id is not None:
@@ -660,17 +707,19 @@ async def update_template(
     if not row:
         raise TaskPoolNotFoundError(f"Plantilla {item_id} no encontrada")
     payload = data.model_dump(exclude_unset=True)
+    payload.pop("budget_weight_percent", None)
+    previous_activity_id = row.budget_activity_id
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
-    if "category_id" in payload:
+    if "chapter_id" in payload:
         cat = (
-            db.query(TaskCategory)
-            .filter(TaskCategory.id == payload["category_id"])
+            db.query(TaskChapter)
+            .filter(TaskChapter.id == payload["chapter_id"])
             .first()
         )
         if not cat:
             raise TaskPoolValidationError(
-                f"No existe categoría {payload['category_id']}"
+                f"No existe capítulo {payload['chapter_id']}"
             )
     if "zone_id" in payload and payload["zone_id"] is not None:
         zone = (
@@ -692,7 +741,7 @@ async def update_template(
             raise TaskPoolValidationError(
                 f"No existe actividad presupuestal {payload['budget_activity_id']}"
             )
-    next_category_id = payload.get("category_id", row.category_id)
+    next_chapter_id = payload.get("chapter_id", row.chapter_id)
     next_activity_id = payload.get("budget_activity_id", row.budget_activity_id)
     if next_activity_id is not None:
         activity = (
@@ -700,12 +749,16 @@ async def update_template(
             .filter(TaskBudgetActivity.id == next_activity_id)
             .first()
         )
-        if activity and activity.category_id != next_category_id:
+        if activity and activity.chapter_id != next_chapter_id:
             raise TaskPoolValidationError(
-                "La actividad presupuestal no pertenece a la categoría seleccionada"
+                "La actividad presupuestal no pertenece al capítulo seleccionado"
             )
     for k, v in payload.items():
         setattr(row, k, v)
+    db.flush()
+    _share_budget_weights(db, row.budget_activity_id)
+    if previous_activity_id != row.budget_activity_id:
+        _share_budget_weights(db, previous_activity_id)
     db.commit()
     return await get_template(db, item_id)
 
@@ -908,28 +961,6 @@ async def publish_version(db: Session, version_id: int) -> TaskTemplateVersion:
         raise TaskPoolValidationError(
             f"Solo se puede publicar una versión draft (actual: {row.status})"
         )
-    if row.base_quantity is None or Decimal(row.base_quantity) <= 0:
-        raise TaskPoolValidationError(
-            "baseQuantity debe ser > 0 antes de publicar"
-        )
-    if row.base_duration_days is None or Decimal(row.base_duration_days) <= 0:
-        raise TaskPoolValidationError(
-            "baseDurationDays debe ser > 0 antes de publicar"
-        )
-    subtasks = (
-        db.query(TaskTemplateSubtask)
-        .filter(TaskTemplateSubtask.template_version_id == version_id)
-        .all()
-    )
-    if subtasks:
-        total_w = sum(
-            Decimal(str(s.weight_percent or 0)) for s in subtasks
-        )
-        if abs(total_w - Decimal("100")) > Decimal("0.05"):
-            raise TaskPoolValidationError(
-                f"Los % de las subtareas deben sumar 100 (actual: {total_w}). "
-                "Ajústalos antes de publicar."
-            )
     row.status = STATUS_PUBLISHED
     row.published_at = datetime.utcnow()
     db.commit()
@@ -1171,7 +1202,7 @@ async def add_subtask(
         description=data.description,
         display_order=data.display_order,
         is_required=data.is_required,
-        weight_percent=data.weight_percent,
+        weight_percent=data.weight_percent if data.weight_percent is not None else 0,
     )
     db.add(row)
     db.commit()

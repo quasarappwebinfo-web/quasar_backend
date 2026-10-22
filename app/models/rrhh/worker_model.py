@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -32,6 +32,8 @@ class Worker(Base):
         ForeignKey("users.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=True,
     )
+    daily_rate = Column(Numeric(12, 2), nullable=True)
+    bank_account = Column(String(40), nullable=True)
     is_active = Column(Integer, default=1)
     deactivation_reason = Column(String(255), nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())

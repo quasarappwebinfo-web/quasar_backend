@@ -17,6 +17,11 @@ class Task(Base):
         ForeignKey("obras.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
     )
+    source_template_id = Column(
+        Integer,
+        ForeignKey("task_templates.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
+    )
     source_template_version_id = Column(
         Integer,
         ForeignKey("task_template_versions.id", ondelete="NO ACTION", onupdate="NO ACTION"),
@@ -62,6 +67,7 @@ class Task(Base):
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
     obra = relationship("Obra", back_populates="tasks")
+    source_template = relationship("TaskTemplate", back_populates="obra_tasks")
     source_template_version = relationship("TaskTemplateVersion", back_populates="tasks")
     parent = relationship("Task", remote_side=[id], backref="subtasks")
     unit = relationship("MeasurementUnit", back_populates="tasks")

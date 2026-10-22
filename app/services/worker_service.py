@@ -52,6 +52,10 @@ def worker_to_dict(worker: Worker) -> Dict[str, Any]:
         ),
         "specialty_name": worker.specialty.name if worker.specialty else None,
         "linked_username": worker.linked_user.username if worker.linked_user else None,
+        "daily_rate": (
+            float(worker.daily_rate) if worker.daily_rate is not None else None
+        ),
+        "bank_account": worker.bank_account,
         "created_at": worker.created_at,
     }
 
@@ -173,6 +177,8 @@ async def create_worker(db: Session, data: WorkerCreate) -> Worker:
         worker_position_id=data.worker_position_id,
         specialty_id=data.specialty_id,
         linked_user_id=data.linked_user_id,
+        daily_rate=data.daily_rate,
+        bank_account=data.bank_account,
         is_active=1,
     )
     db.add(worker)

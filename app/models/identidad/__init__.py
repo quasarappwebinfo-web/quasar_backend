@@ -4,5 +4,13 @@ from app.models.identidad.user_role_model import UserRole
 from app.models.identidad.user_model import User
 from app.models.identidad.user_permission_model import UserPermission
 from app.models.identidad.refresh_token_model import RefreshToken
+from app.models.identidad.user_notification_model import UserNotification
 
-__all__ = ["Person", "UserRole", "User", "UserPermission", "RefreshToken"]
+__all__ = [
+    "Person",
+    "UserRole",
+    "User",
+    "UserPermission",
+    "RefreshToken",
+    "UserNotification",
+]

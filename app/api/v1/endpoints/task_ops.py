@@ -46,8 +46,11 @@ from app.schemas import (
     TaskStatusChangeResult,
     TaskStatusHistoryResponse,
     TaskUpdate,
+    WorkPlanResponse,
 )
+from app.schemas.operacion.task_schema import ObraFulfillmentResponse, TaskAddToPeriod
 from app.services import task_service as svc
+from app.services import work_plan_service as plans
 
 router = APIRouter(prefix="/api/v1/operacion/tareas", tags=["tareas"])
 
@@ -83,7 +86,7 @@ async def list_tasks(
     page: int = Query(1, ge=1),
     obra_id: Optional[int] = Query(None, alias="obraId"),
     status_filter: Optional[str] = Query(None, alias="status"),
-    category_id: Optional[int] = Query(None, alias="categoryId"),
+    chapter_id: Optional[int] = Query(None, alias="chapterId"),
     search: Optional[str] = None,
     date_from: Optional[date] = Query(None, alias="dateFrom"),
     date_to: Optional[date] = Query(None, alias="dateTo"),
@@ -99,7 +102,7 @@ async def list_tasks(
             page=page,
             obra_id=obra_id,
             status=status_filter,
-            category_id=category_id,
+            chapter_id=chapter_id,
             search=search,
             date_from=date_from,
             date_to=date_to,
@@ -117,7 +120,7 @@ async def list_tasks(
 @router.get("/tablero", summary="Kanban por obra (columnas de status)")
 async def board(
     obra_id: int = Query(..., alias="obraId"),
-    category_id: Optional[int] = Query(None, alias="categoryId"),
+    chapter_id: Optional[int] = Query(None, alias="chapterId"),
     date_from: Optional[date] = Query(None, alias="dateFrom"),
     date_to: Optional[date] = Query(None, alias="dateTo"),
     db: Session = Depends(get_db),
@@ -128,7 +131,7 @@ async def board(
         result = await svc.list_board(
             db,
             obra_id=obra_id,
-            category_id=category_id,
+            chapter_id=chapter_id,
             date_from=date_from,
             date_to=date_to,
         )
@@ -147,10 +150,94 @@ async def board(
         _err(e)
 
 
+@router.get(
+    "/cumplimiento",
+    summary="Avance de la obra por capítulo, actividad presupuestal y global",
+)
+async def fulfillment(
+    obra_id: int = Query(..., alias="obraId"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    _ = user_auth
+    try:
+        result = await svc.obra_fulfillment(db, obra_id)
+        return ObraFulfillmentResponse(**result).model_dump(by_alias=True)
+    except svc.TaskOpError as e:
+        _err(e)
+
+
+@router.get(
+    "/galeria",
+    summary="Galería de evidencias de una obra, de la más reciente a la más antigua",
+)
+async def photo_gallery(
+    obra_id: int = Query(..., alias="obraId"),
+    chapter_id: Optional[int] = Query(None, alias="chapterId"),
+    budget_activity_id: Optional[int] = Query(None, alias="budgetActivityId"),
+    task_id: Optional[int] = Query(None, alias="taskId"),
+    page: int = Query(1, ge=1),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    from app.schemas.operacion.task_side_schemas import TaskPhotoGalleryItem
+
+    _ = user_auth
+    try:
+        result = await svc.list_obra_photo_gallery(
+            db,
+            obra_id=obra_id,
+            chapter_id=chapter_id,
+            budget_activity_id=budget_activity_id,
+            task_id=task_id,
+            page=page,
+        )
+        return {
+            "photos": [
+                TaskPhotoGalleryItem(**row).model_dump(by_alias=True)
+                for row in result["photos"]
+            ],
+            "pagination": result["pagination"],
+        }
+    except svc.TaskOpError as e:
+        _err(e)
+
+
+@router.post(
+    "/agregar-al-periodo",
+    status_code=status.HTTP_201_CREATED,
+    summary="Agregar actividad al periodo y pedir de nuevo la firma",
+)
+async def add_to_period(
+    data: TaskAddToPeriod,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    try:
+        result = await plans.add_activity_to_period(
+            db, data, created_by=user_auth.id
+        )
+        return {
+            "task": _task(result["task"]),
+            "workPlan": WorkPlanResponse(**result["work_plan"]).model_dump(
+                by_alias=True
+            ),
+            "justification": result["justification"],
+        }
+    except plans.WorkPlanError as e:
+        if isinstance(e, plans.WorkPlanNotFoundError):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        if isinstance(e, plans.WorkPlanConflictError):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except svc.TaskOpError as e:
+        _err(e)
+
+
 @router.post(
     "/desde-plantilla",
     status_code=status.HTTP_201_CREATED,
-    summary="Crear tarea desde versión published del Task Pool",
+    summary="Crear tarea desde una actividad registrada (versión opcional)",
 )
 async def create_from_template(
     data: TaskCreateFromTemplate,
