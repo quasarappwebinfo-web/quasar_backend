@@ -8,6 +8,13 @@ from typing import Tuple
 
 from PIL import Image, ImageOps
 
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass
+
 # Lado máximo (px) — suficiente para cards / hero de obra
 MAX_SIDE_PX = 1600
 # Objetivo de peso; se baja calidad hasta acercarse
@@ -44,15 +51,18 @@ def compress_image_for_upload(
     if not raw:
         raise ImageProcessingError("Archivo vacío")
 
-    if content_type and content_type.lower() not in ALLOWED_CONTENT_TYPES:
+    normalized = (content_type or "").split(";", 1)[0].strip().lower()
+    if normalized and normalized not in ALLOWED_CONTENT_TYPES:
         # Algunos clientes mandan application/octet-stream; intentamos abrir igual
-        if content_type.lower() not in ("application/octet-stream", ""):
+        if normalized not in ("application/octet-stream",):
             raise ImageProcessingError(
-                f"Tipo no permitido: {content_type}. Usa JPEG, PNG o WebP."
+                f"Tipo no permitido: {content_type}. Usa JPEG, PNG, WebP o HEIC."
             )
 
     try:
         img = Image.open(BytesIO(raw))
+        if img.format == "JPEG":
+            img.draft("RGB", (max_side, max_side))
         img = ImageOps.exif_transpose(img)
     except Exception as e:
         raise ImageProcessingError(f"No se pudo leer la imagen: {e}") from e
@@ -74,13 +84,13 @@ def compress_image_for_upload(
 
     quality = START_QUALITY
     output = BytesIO()
-    img.save(output, format="WEBP", quality=quality, method=6)
+    img.save(output, format="WEBP", quality=quality, method=4)
     data = output.getvalue()
 
     while len(data) > target_max_bytes and quality > MIN_QUALITY:
         quality = max(MIN_QUALITY, quality - 8)
         output = BytesIO()
-        img.save(output, format="WEBP", quality=quality, method=6)
+        img.save(output, format="WEBP", quality=quality, method=4)
         data = output.getvalue()
 
     # Si aún es enorme, reduce dimensiones otra vez
@@ -95,7 +105,7 @@ def compress_image_for_upload(
             Image.Resampling.LANCZOS,
         )
         output = BytesIO()
-        img.save(output, format="WEBP", quality=MIN_QUALITY, method=6)
+        img.save(output, format="WEBP", quality=MIN_QUALITY, method=4)
         data = output.getvalue()
 
     return data, "image/webp", "webp"
