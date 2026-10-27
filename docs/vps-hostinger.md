@@ -223,12 +223,15 @@ server {
 server {
     listen 80;
     server_name api-test.constructoraquasar.com;
+    client_max_body_size 25m;
     location / {
         proxy_pass http://127.0.0.1:8002;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 
@@ -244,12 +247,15 @@ server {
 server {
     listen 80;
     server_name api.constructoraquasar.com;
+    client_max_body_size 25m;
     location / {
         proxy_pass http://127.0.0.1:8003;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 ```
@@ -259,6 +265,8 @@ sudo ln -s /etc/nginx/sites-available/quasar /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+`client_max_body_size 25m` va en los dos `server` de la API (`api-test` y `api`). Sin eso Nginx rechaza las fotos del celular (el límite de fábrica es 1 MB) y la app las deja en sync. Si Certbot ya creó los bloques `listen 443`, el límite se agrega ahí, no solo en el puerto 80.
 
 ---
 
