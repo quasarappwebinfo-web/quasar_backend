@@ -246,8 +246,9 @@ class TaskPhotoGalleryItem(BaseResponseSchema):
     taken_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     uploaded_by_name: Optional[str] = None
-    task_id: int
+    task_id: Optional[int] = None
     task_name: str
+    kind: str = "task"
     subtask_name: Optional[str] = None
     chapter_id: Optional[int] = None
     chapter_name: Optional[str] = None

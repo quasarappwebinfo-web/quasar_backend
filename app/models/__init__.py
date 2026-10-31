@@ -60,6 +60,7 @@ from app.models.operacion import (
     TaskReschedule,
     TaskDelayEvent,
     TaskComment,
+    ObraPhoto,
     TaskPhoto,
     TaskDocument,
 )
@@ -116,6 +117,7 @@ __all__ = [
     "TaskReschedule",
     "TaskDelayEvent",
     "TaskComment",
+    "ObraPhoto",
     "TaskPhoto",
     "TaskDocument",
     "WorkPlan",

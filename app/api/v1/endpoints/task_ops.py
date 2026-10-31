@@ -2,7 +2,7 @@
 Endpoints operación — tareas en obra /api/v1/operacion/tareas
 """
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -176,6 +176,10 @@ async def photo_gallery(
     chapter_id: Optional[int] = Query(None, alias="chapterId"),
     budget_activity_id: Optional[int] = Query(None, alias="budgetActivityId"),
     task_id: Optional[int] = Query(None, alias="taskId"),
+    kind: Optional[str] = Query(
+        None,
+        description="task = solo actividades; obra = fotos sin actividad",
+    ),
     page: int = Query(1, ge=1),
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
@@ -190,6 +194,7 @@ async def photo_gallery(
             chapter_id=chapter_id,
             budget_activity_id=budget_activity_id,
             task_id=task_id,
+            kind=kind,
             page=page,
         )
         return {
@@ -198,6 +203,45 @@ async def photo_gallery(
                 for row in result["photos"]
             ],
             "pagination": result["pagination"],
+        }
+    except svc.TaskOpError as e:
+        _err(e)
+
+
+@router.post(
+    "/galeria",
+    status_code=status.HTTP_201_CREATED,
+    summary="Subir fotos de la obra sin actividad",
+)
+async def upload_obra_gallery_photos(
+    obra_id: int = Form(..., alias="obraId"),
+    files: List[UploadFile] = File(...),
+    descriptions: List[str] = Form(...),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    """Varias fotos a la vez. Cada archivo lleva su descripción, en el mismo orden."""
+    from app.schemas.operacion.task_side_schemas import TaskPhotoGalleryItem
+    from app.services.obra_photo_service import upload_obra_photos
+
+    try:
+        if len(files) != len(descriptions):
+            raise svc.TaskOpValidationError("Cada foto necesita su descripción")
+        payload = []
+        for upload, description in zip(files, descriptions):
+            payload.append(
+                (await upload.read(), upload.content_type, description)
+            )
+        rows = await upload_obra_photos(
+            db,
+            obra_id=obra_id,
+            files=payload,
+            uploaded_by=user_auth.id,
+        )
+        return {
+            "photos": [
+                TaskPhotoGalleryItem(**row).model_dump(by_alias=True) for row in rows
+            ]
         }
     except svc.TaskOpError as e:
         _err(e)
