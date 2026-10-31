@@ -9,6 +9,7 @@ from app.models.operacion.task_status_history_model import TaskStatusHistory
 from app.models.operacion.task_reschedule_model import TaskReschedule
 from app.models.operacion.task_delay_event_model import TaskDelayEvent
 from app.models.operacion.task_comment_model import TaskComment
+from app.models.operacion.obra_photo_model import ObraPhoto
 from app.models.operacion.task_photo_model import TaskPhoto
 from app.models.operacion.task_document_model import TaskDocument
 
@@ -24,6 +25,7 @@ __all__ = [
     "TaskReschedule",
     "TaskDelayEvent",
     "TaskComment",
+    "ObraPhoto",
     "TaskPhoto",
     "TaskDocument",
 ]

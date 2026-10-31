@@ -2158,15 +2158,34 @@ async def list_obra_photo_gallery(
     chapter_id: Optional[int] = None,
     budget_activity_id: Optional[int] = None,
     task_id: Optional[int] = None,
+    kind: Optional[str] = None,
     page: int = 1,
     limit: int = 24,
 ) -> Dict[str, Any]:
     """Fotos de evidencia de una obra, de la más reciente a la más antigua."""
+    from app.services.obra_photo_service import list_gallery_items
+
+    if kind not in (None, "", "task", "obra"):
+        raise TaskOpValidationError("kind debe ser task u obra")
+
     obra = db.query(Obra).filter(Obra.id == obra_id).first()
     if not obra:
         raise TaskOpNotFoundError(f"Obra {obra_id} no encontrada")
 
-    rows = (
+    activity_filter = any(
+        value is not None for value in (chapter_id, budget_activity_id, task_id)
+    )
+    if kind == "obra":
+        include_tasks = False
+        include_obra = True
+    elif kind == "task":
+        include_tasks = True
+        include_obra = False
+    else:
+        include_tasks = True
+        include_obra = not activity_filter
+
+    rows = () if not include_tasks else (
         db.query(TaskPhoto)
         .join(Task, TaskPhoto.task_id == Task.id)
         .options(
@@ -2228,7 +2247,15 @@ async def list_obra_photo_gallery(
                 "chapter_name": chapter.name if chapter is not None else None,
                 "budget_activity_id": budget.id if budget is not None else None,
                 "budget_activity_name": budget.name if budget is not None else None,
+                "kind": "task",
             }
+        )
+
+    if include_obra:
+        items.extend(list_gallery_items(db, obra_id))
+        items.sort(
+            key=lambda row: (row.get("created_at") or datetime.min, row["id"]),
+            reverse=True,
         )
 
     total = len(items)
