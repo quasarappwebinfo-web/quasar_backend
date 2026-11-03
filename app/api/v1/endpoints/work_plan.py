@@ -219,7 +219,10 @@ async def cancel_signature(
         _err(e)
 
 
-@router.post("/{plan_id}/vista", summary="Registrar evento viewed")
+@router.post(
+    "/{plan_id}/vista",
+    summary="Compatibilidad: ya no registra vistas en el historial",
+)
 async def mark_viewed(
     plan_id: int,
     db: Session = Depends(get_db),

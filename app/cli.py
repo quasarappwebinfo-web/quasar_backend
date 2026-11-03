@@ -19,14 +19,13 @@ def cli():
 @cli.command("create-person")
 @click.option("--document", prompt="Cédula / documento", help="document_number único")
 @click.option("--name", prompt="Nombre completo")
-@click.option("--phone", default=None)
-def create_person_cmd(document: str, name: str, phone: str | None):
+def create_person_cmd(document: str, name: str):
     db: Session = SessionLocal()
     try:
         if db.query(Person).filter(Person.document_number == document).first():
             click.echo(f"Error: ya existe persona con documento '{document}'", err=True)
             return
-        person = Person(document_number=document, name=name, phone=phone)
+        person = Person(document_number=document, name=name)
         db.add(person)
         db.commit()
         click.echo(f"Persona creada id={person.id} documento={document}")
