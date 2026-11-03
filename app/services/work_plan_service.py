@@ -617,6 +617,7 @@ async def get_plan_detail(db: Session, plan_id: int) -> Dict[str, Any]:
                 current.signature_events or [],
                 key=lambda x: x.event_at or datetime.min,
             )
+            if e.event_type != "viewed"
         ]
         # Planes antiguos sin evento created: completar desde la versión
         if not any(e.get("event_type") == "created" for e in events):
@@ -1127,23 +1128,8 @@ async def mark_viewed(
     *,
     user_id: int,
 ) -> None:
-    plan = await get_plan(db, plan_id)
-    if not plan.current_version_id:
-        return
-    version = _load_version(db, plan.current_version_id)
-    is_signer = any(s.user_id == user_id for s in version.signers)
-    if not is_signer and plan.requested_by != user_id:
-        raise WorkPlanValidationError(
-            "Solo firmantes o el solicitante registran vista"
-        )
-    _append_event(
-        db,
-        version_id=version.id,
-        event_type="viewed",
-        user_id=user_id,
-        details="Versión vista",
-    )
-    db.commit()
+    """Las vistas ya no se guardan: saturaban el historial del plan."""
+    _ = (db, plan_id, user_id)
 
 
 async def sign_plan(

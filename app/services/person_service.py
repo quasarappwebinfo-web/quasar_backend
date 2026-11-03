@@ -12,9 +12,7 @@ def person_to_dict(person: Person) -> Dict[str, Any]:
         "id": person.id,
         "document_number": person.document_number,
         "name": person.name,
-        "phone": person.phone,
         "photo_url": person.photo_url,
-        "birth_date": person.birth_date,
         "created_at": person.created_at,
     }
 
@@ -46,9 +44,7 @@ async def create_person(db: Session, data: PersonCreate) -> Person:
     person = Person(
         document_number=data.document_number,
         name=data.name,
-        phone=data.phone,
         photo_url=data.photo_url,
-        birth_date=data.birth_date,
     )
     db.add(person)
     try:

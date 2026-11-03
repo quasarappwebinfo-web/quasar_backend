@@ -107,9 +107,7 @@ Respuesta: `{ "persons": [...], "pagination": {...} }`.
 {
   "documentNumber": "1234567890",
   "name": "Ana Pérez",
-  "phone": "3001234567",
-  "photoUrl": null,
-  "birthDate": "1990-05-12"
+  "photoUrl": null
 }
 ```
 

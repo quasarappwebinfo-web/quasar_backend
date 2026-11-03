@@ -89,7 +89,7 @@ async def get_person_endpoint(
     "/{person_id}",
     response_model=PersonResponse,
     summary="Actualizar persona",
-    description="Actualiza nombre, teléfono, foto o fecha de nacimiento. "
+    description="Actualiza nombre o foto. "
     "El documento (cédula) no se puede cambiar.",
 )
 async def update_person_endpoint(
