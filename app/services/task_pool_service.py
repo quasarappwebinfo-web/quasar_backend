@@ -4,6 +4,7 @@ Publicadas = inmutables. El sistema recomienda; nadie auto-aprueba.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
@@ -84,6 +85,7 @@ def chapter_to_dict(row: TaskChapter) -> Dict[str, Any]:
         "description": row.description,
         "display_order": row.display_order,
         "weight_percent": row.weight_percent,
+        "is_global": row.is_global or 0,
         "is_active": row.is_active,
         "created_at": row.created_at,
     }
@@ -261,13 +263,15 @@ async def create_chapter(db: Session, data: TaskChapterCreate) -> TaskChapter:
     exists = db.query(TaskChapter).filter(TaskChapter.name == data.name).first()
     if exists:
         raise TaskPoolConflictError(f"Ya existe capítulo '{data.name}'")
-    _active_stage(db, data.stage_id)
+    if data.stage_id is not None:
+        _active_stage(db, data.stage_id)
     row = TaskChapter(
         name=data.name,
         stage_id=data.stage_id,
         description=data.description,
         display_order=data.display_order,
         weight_percent=data.weight_percent,
+        is_global=1 if data.is_global == 1 else 0,
         is_active=1,
     )
     db.add(row)
@@ -297,7 +301,7 @@ async def list_chapters(
         q = q.filter(TaskChapter.name.ilike(f"%{search.strip()}%"))
     total = q.count()
     rows = (
-        q.order_by(TaskChapter.display_order.asc(), TaskChapter.name.asc())
+        q.order_by(TaskChapter.name.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -315,6 +319,8 @@ async def update_chapter(
     payload = data.model_dump(exclude_unset=True)
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
+    if "is_global" in payload and payload["is_global"] not in (0, 1):
+        raise TaskPoolValidationError("is_global debe ser 0 o 1")
     if "stage_id" in payload and payload["stage_id"] is not None:
         _active_stage(db, payload["stage_id"])
     if "name" in payload and payload["name"] != row.name:
@@ -372,7 +378,7 @@ async def list_zones(
         q = q.filter(TaskZone.name.ilike(f"%{search.strip()}%"))
     total = q.count()
     rows = (
-        q.order_by(TaskZone.display_order.asc(), TaskZone.name.asc())
+        q.order_by(TaskZone.name.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -491,10 +497,7 @@ async def list_budget_activities(
         q = q.filter(TaskBudgetActivity.name.ilike(f"%{search.strip()}%"))
     total = q.count()
     rows = (
-        q.order_by(
-            TaskBudgetActivity.display_order.asc(),
-            TaskBudgetActivity.name.asc(),
-        )
+        q.order_by(TaskBudgetActivity.name.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -615,9 +618,7 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         raise TaskPoolValidationError(
             "La actividad presupuestal no pertenece al capítulo seleccionado"
         )
-    code = data.code.strip()
-    if db.query(TaskTemplate).filter(TaskTemplate.code == code).first():
-        raise TaskPoolConflictError(f"Ya existe plantilla con code='{code}'")
+    code = f"ACT-{uuid.uuid4().hex[:12].upper()}"
     row = TaskTemplate(
         chapter_id=data.chapter_id,
         zone_id=data.zone_id,
@@ -684,12 +685,10 @@ async def list_templates(
         q = q.filter(TaskTemplate.budget_activity_id == budget_activity_id)
     if search:
         term = f"%{search.strip()}%"
-        q = q.filter(
-            (TaskTemplate.name.ilike(term)) | (TaskTemplate.code.ilike(term))
-        )
+        q = q.filter(TaskTemplate.name.ilike(term))
     total = q.count()
     rows = (
-        q.order_by(TaskTemplate.code.asc())
+        q.order_by(TaskTemplate.name.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -1006,7 +1005,7 @@ async def list_version_detail(db: Session, version_id: int) -> Dict[str, Any]:
     subtasks = (
         db.query(TaskTemplateSubtask)
         .filter(TaskTemplateSubtask.template_version_id == version_id)
-        .order_by(TaskTemplateSubtask.display_order.asc())
+        .order_by(TaskTemplateSubtask.id.asc())
         .all()
     )
     deps = (

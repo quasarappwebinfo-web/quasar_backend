@@ -1,7 +1,4 @@
-"""
-Planificación y firmas (Fase 7).
-Versión firmada = inmutable. Firma = aprobación de una versión concreta.
-"""
+"""Planificación de obra. Las firmas quedaron fuera de uso."""
 from __future__ import annotations
 
 import uuid as uuid_lib
@@ -18,10 +15,7 @@ from app.models import (
     TaskDelayEvent,
     TaskTemplateVersion,
     User,
-    UserNotification,
-    UserRole,
     WorkPlan,
-    WorkPlanSignature,
     WorkPlanSignatureEvent,
     WorkPlanSigner,
     WorkPlanTask,
@@ -38,15 +32,11 @@ from app.services.task_service import (
 from app.schemas import (
     WorkPlanCreate,
     WorkPlanNewVersionRequest,
-    WorkPlanRejectRequest,
-    WorkPlanSignerAdd,
-    WorkPlanSignRequest,
     WorkPlanTaskAdd,
     WorkPlanUpdate,
 )
 from app.schemas.planificacion.work_plan_schema import (
     SIGNATURE_EVENT_TYPES,
-    SIGNATURE_TYPES,
     WORK_PLAN_STATUSES,
 )
 
@@ -55,9 +45,7 @@ STATUS_PENDING = "pending_signature"
 STATUS_SIGNED = "signed"
 STATUS_REJECTED = "rejected"
 
-SIGNER_PENDING = "pending"
 SIGNER_SIGNED = "signed"
-SIGNER_REJECTED = "rejected"
 
 
 class WorkPlanError(Exception):
@@ -136,9 +124,7 @@ def plan_to_dict(row: WorkPlan) -> Dict[str, Any]:
 def version_to_dict(
     row: WorkPlanVersion, *, plan_status: Optional[str] = None
 ) -> Dict[str, Any]:
-    immutable = plan_status == STATUS_SIGNED or (
-        row.signed_at is not None
-    )
+    immutable = False
     tasks = list(row.tasks) if row.tasks is not None else []
     signers = list(row.signers) if row.signers is not None else []
     return {
@@ -190,20 +176,6 @@ def signer_to_dict(row: WorkPlanSigner) -> Dict[str, Any]:
         "rejection_reason": row.rejection_reason,
         "signature_type": latest_sig.signature_type if latest_sig else None,
         "signature_data": latest_sig.signature_data if latest_sig else None,
-    }
-
-
-def signature_to_dict(row: WorkPlanSignature) -> Dict[str, Any]:
-    return {
-        "id": row.id,
-        "work_plan_signer_id": row.work_plan_signer_id,
-        "user_id": row.user_id,
-        "user_name": _user_display(row.user),
-        "signature_type": row.signature_type,
-        "signature_data": row.signature_data,
-        "signed_at": row.signed_at,
-        "ip_address": row.ip_address,
-        "user_agent": row.user_agent,
     }
 
 
@@ -314,28 +286,13 @@ def _snapshot_from_task(
 
 
 def _require_draft_plan(plan: WorkPlan) -> None:
-    if plan.status != STATUS_DRAFT:
-        raise WorkPlanValidationError(
-            f"El plan está en status='{plan.status}'. "
-            "Solo draft es editable. Firmado = nueva versión."
-        )
+    _ = plan
 
 
 def _require_editable_version(db: Session, version: WorkPlanVersion) -> WorkPlan:
     plan = db.query(WorkPlan).filter(WorkPlan.id == version.work_plan_id).first()
     if not plan:
         raise WorkPlanNotFoundError("Plan no encontrado")
-    if plan.status == STATUS_SIGNED or version.signed_at:
-        raise WorkPlanValidationError(
-            "Versión firmada inmutable. Crea una nueva versión."
-        )
-    if plan.status not in (STATUS_DRAFT, STATUS_REJECTED):
-        # pending_signature: no editar tareas/firmantes salvo cancelar
-        if plan.status == STATUS_PENDING:
-            raise WorkPlanValidationError(
-                "Plan pendiente de firma. Cancela la solicitud para editar, "
-                "o espera firmas."
-            )
     return plan
 
 
@@ -617,7 +574,7 @@ async def get_plan_detail(db: Session, plan_id: int) -> Dict[str, Any]:
                 current.signature_events or [],
                 key=lambda x: x.event_at or datetime.min,
             )
-            if e.event_type != "viewed"
+            if e.event_type in ("created", "edited")
         ]
         # Planes antiguos sin evento created: completar desde la versión
         if not any(e.get("event_type") == "created" for e in events):
@@ -633,29 +590,6 @@ async def get_plan_detail(db: Session, plan_id: int) -> Dict[str, Any]:
                     "details": f"Versión {current.version_number}",
                 },
             )
-        # Firmas guardadas en firmante sin evento (datos legacy)
-        signed_user_ids = {
-            e.get("user_id")
-            for e in events
-            if e.get("event_type") == "signed" and e.get("user_id") is not None
-        }
-        for signer in current.signers or []:
-            if (
-                signer.status == SIGNER_SIGNED
-                and signer.user_id not in signed_user_ids
-                and signer.signed_at
-            ):
-                events.append(
-                    {
-                        "id": -(100000 + (signer.id or 0)),
-                        "work_plan_version_id": current.id,
-                        "user_id": signer.user_id,
-                        "user_name": _user_display(signer.user),
-                        "event_type": "signed",
-                        "event_at": signer.signed_at,
-                        "details": "Firma registrada",
-                    }
-                )
         events.sort(key=lambda e: e.get("event_at") or datetime.min)
         detail["currentVersion"] = {
             "version": version_to_dict(current, plan_status=plan.status),
@@ -745,517 +679,6 @@ async def remove_task_from_version(
     db.commit()
 
 
-# ---------- Signers / flow ----------
-
-
-async def add_signer(
-    db: Session,
-    version_id: int,
-    data: WorkPlanSignerAdd,
-    *,
-    edited_by: int,
-) -> WorkPlanSigner:
-    version = _load_version(db, version_id)
-    if not version:
-        raise WorkPlanNotFoundError(f"Versión {version_id} no encontrada")
-    plan = _require_editable_version(db, version)
-    _require_draft_plan(plan)
-
-    user = (
-        db.query(User)
-        .options(joinedload(User.person))
-        .filter(User.id == data.user_id, User.is_active == 1)
-        .first()
-    )
-    if not user:
-        raise WorkPlanValidationError(
-            f"Usuario {data.user_id} inválido o inactivo"
-        )
-    exists = (
-        db.query(WorkPlanSigner)
-        .filter(
-            WorkPlanSigner.work_plan_version_id == version_id,
-            WorkPlanSigner.user_id == data.user_id,
-        )
-        .first()
-    )
-    if exists:
-        raise WorkPlanConflictError("El usuario ya es firmante de esta versión")
-
-    row = WorkPlanSigner(
-        work_plan_version_id=version_id,
-        user_id=data.user_id,
-        signature_order=data.signature_order,
-        status=SIGNER_PENDING,
-    )
-    db.add(row)
-    _append_event(
-        db,
-        version_id=version_id,
-        event_type="edited",
-        user_id=edited_by,
-        details=f"Firmante agregado: {_user_display(user) or user.username}",
-    )
-    db.commit()
-    return (
-        db.query(WorkPlanSigner)
-        .options(joinedload(WorkPlanSigner.user).joinedload(User.person))
-        .filter(WorkPlanSigner.id == row.id)
-        .first()
-    )
-
-
-async def remove_signer(
-    db: Session, signer_id: int, *, edited_by: int
-) -> None:
-    row = (
-        db.query(WorkPlanSigner)
-        .options(joinedload(WorkPlanSigner.user).joinedload(User.person))
-        .filter(WorkPlanSigner.id == signer_id)
-        .first()
-    )
-    if not row:
-        raise WorkPlanNotFoundError(f"Firmante {signer_id} no encontrado")
-    version = _load_version(db, row.work_plan_version_id)
-    plan = _require_editable_version(db, version)
-    _require_draft_plan(plan)
-    name = _user_display(row.user) or f"#{row.user_id}"
-    version_id = row.work_plan_version_id
-    db.delete(row)
-    _append_event(
-        db,
-        version_id=version_id,
-        event_type="edited",
-        user_id=edited_by,
-        details=f"Firmante quitado: {name}",
-    )
-    db.commit()
-
-
-def _admin_users(db: Session) -> List[User]:
-    return (
-        db.query(User)
-        .options(joinedload(User.person), joinedload(User.role))
-        .outerjoin(UserRole, User.role_id == UserRole.id)
-        .filter(User.is_active == 1)
-        .filter(or_(User.is_super == 1, UserRole.name.ilike("%admin%")))
-        .all()
-    )
-
-
-def _add_signer_row(db: Session, version_id: int, user_id: int, order: int) -> None:
-    exists = (
-        db.query(WorkPlanSigner)
-        .filter(
-            WorkPlanSigner.work_plan_version_id == version_id,
-            WorkPlanSigner.user_id == user_id,
-        )
-        .first()
-    )
-    if exists:
-        if exists.status != SIGNER_PENDING:
-            exists.status = SIGNER_PENDING
-            exists.signed_at = None
-            exists.rejected_at = None
-            exists.rejection_reason = None
-        return
-    db.add(
-        WorkPlanSigner(
-            work_plan_version_id=version_id,
-            user_id=user_id,
-            signature_order=order,
-            status=SIGNER_PENDING,
-        )
-    )
-
-
-def _ensure_admin_signers(db: Session, version: WorkPlanVersion, admins: List[User]) -> None:
-    order = len(version.signers or []) + 1
-    for admin in admins:
-        _add_signer_row(db, version.id, admin.id, order)
-        order += 1
-    db.flush()
-
-
-def _version_with_added_task(
-    db: Session,
-    plan: WorkPlan,
-    task: Task,
-    *,
-    created_by: int,
-) -> WorkPlanVersion:
-    """Deja un draft que incluye la actividad nueva. No hace commit."""
-    if plan.status == STATUS_PENDING:
-        plan.status = STATUS_DRAFT
-        if plan.current_version_id:
-            _append_event(
-                db,
-                version_id=plan.current_version_id,
-                event_type="cancelled",
-                user_id=created_by,
-                details="Se reabre el plan para agregar una actividad",
-            )
-
-    if plan.status in (STATUS_SIGNED, STATUS_REJECTED):
-        prev = _load_version(db, plan.current_version_id)
-        max_num = (
-            db.query(func.max(WorkPlanVersion.version_number))
-            .filter(WorkPlanVersion.work_plan_id == plan.id)
-            .scalar()
-            or 0
-        )
-        version = WorkPlanVersion(
-            work_plan_id=plan.id,
-            version_number=max_num + 1,
-            created_by=created_by,
-        )
-        db.add(version)
-        db.flush()
-        previous_ids = [row.task_id for row in (prev.tasks or [])]
-        if task.id not in previous_ids:
-            previous_ids.append(task.id)
-        rows = (
-            db.query(Task)
-            .options(joinedload(Task.unit))
-            .filter(Task.id.in_(previous_ids), Task.obra_id == plan.obra_id)
-            .all()
-        )
-        by_id = {row.id: row for row in rows}
-        for task_id in previous_ids:
-            current = by_id.get(task_id)
-            if not current:
-                continue
-            if current.id == task.id:
-                current.planned_start_date = plan.start_date
-                current.planned_end_date = plan.end_date
-            db.add(_snapshot_from_task(db, version_id=version.id, task=current))
-        order = 1
-        for signer in prev.signers or []:
-            _add_signer_row(db, version.id, signer.user_id, signer.signature_order or order)
-            order += 1
-        plan.current_version_id = version.id
-        plan.status = STATUS_DRAFT
-        _append_event(
-            db,
-            version_id=version.id,
-            event_type="created",
-            user_id=created_by,
-            details=f"Nueva versión {version.version_number} por una actividad agregada",
-        )
-        db.flush()
-        return _load_version(db, version.id)
-
-    version = _load_version(db, plan.current_version_id)
-    if not version:
-        raise WorkPlanValidationError("El plan no tiene versión para agregar la actividad")
-    already = any(row.task_id == task.id for row in (version.tasks or []))
-    if not already:
-        task.planned_start_date = plan.start_date
-        task.planned_end_date = plan.end_date
-        loaded = (
-            db.query(Task)
-            .options(joinedload(Task.unit))
-            .filter(Task.id == task.id)
-            .first()
-        )
-        db.add(_snapshot_from_task(db, version_id=version.id, task=loaded or task))
-        db.flush()
-    plan.status = STATUS_DRAFT
-    return _load_version(db, version.id)
-
-
-async def add_activity_to_period(
-    db: Session,
-    data: TaskAddToPeriod,
-    *,
-    created_by: int,
-) -> Dict[str, Any]:
-    justification = data.justification.strip()
-    if len(justification) < 8:
-        raise WorkPlanValidationError("Escribe la justificación de la actividad.")
-
-    plan = _period_plan(db, data.obra_id)
-    if not plan:
-        raise WorkPlanValidationError(
-            "Esta obra no tiene un periodo de planificación. "
-            "Crea el plan antes de agregar actividades."
-        )
-
-    if data.template_id:
-        task = add_task_from_catalog(
-            db,
-            TaskCreateFromTemplate(
-                obra_id=data.obra_id,
-                template_id=data.template_id,
-                name=data.name,
-                description=data.description,
-                planned_start_date=plan.start_date,
-                planned_end_date=plan.end_date,
-                copy_subtasks=False,
-                instantiate_dependencies=False,
-            ),
-            created_by=created_by,
-        )
-    else:
-        task = add_unique_obra_task(
-            db,
-            obra_id=data.obra_id,
-            name=data.name or "",
-            description=data.description,
-            planned_start_date=plan.start_date,
-            planned_end_date=plan.end_date,
-            created_by=created_by,
-        )
-
-    admins = _admin_users(db)
-    if not admins:
-        raise WorkPlanValidationError(
-            "No hay administradores activos para avisar y firmar."
-        )
-
-    version = _version_with_added_task(db, plan, task, created_by=created_by)
-    _ensure_admin_signers(db, version, admins)
-    version_id = version.id
-    db.flush()
-    db.expire(version)
-    version = _load_version(db, version_id)
-    if not version or not version.signers:
-        raise WorkPlanValidationError("No quedó ningún firmante para el plan.")
-
-    plan.status = STATUS_PENDING
-    plan.requested_by = created_by
-    detail = f"Se añadió «{task.name}». Justificación: {justification}"
-    _append_event(
-        db,
-        version_id=version.id,
-        event_type="requested",
-        user_id=created_by,
-        details=detail,
-    )
-    link = f"/dashboard/planes/{plan.id}"
-    for admin in admins:
-        db.add(
-            UserNotification(
-                user_id=admin.id,
-                title=f"Firma pendiente · {plan.name}",
-                body=detail,
-                link=link,
-            )
-        )
-    db.commit()
-    return {
-        "task": task_to_dict(await get_task(db, task.id)),
-        "work_plan": plan_to_dict(await get_plan(db, plan.id)),
-        "justification": justification,
-    }
-
-
-async def request_signatures(
-    db: Session,
-    plan_id: int,
-    *,
-    requested_by: int,
-) -> WorkPlan:
-    plan = db.query(WorkPlan).filter(WorkPlan.id == plan_id).first()
-    if not plan:
-        raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
-    if plan.status not in (STATUS_DRAFT, STATUS_REJECTED):
-        raise WorkPlanValidationError(
-            f"Solo draft/rejected pueden solicitar firma (actual: {plan.status})"
-        )
-    if not plan.current_version_id:
-        raise WorkPlanValidationError("El plan no tiene versión actual")
-
-    version = _load_version(db, plan.current_version_id)
-    if not version.tasks:
-        raise WorkPlanValidationError(
-            "La versión no tiene tareas en el snapshot"
-        )
-    if not version.signers:
-        raise WorkPlanValidationError(
-            "Define al menos un firmante antes de solicitar firma"
-        )
-
-    # Reset rejected signers to pending if re-requesting
-    for s in version.signers:
-        if s.status == SIGNER_REJECTED:
-            s.status = SIGNER_PENDING
-            s.rejected_at = None
-            s.rejection_reason = None
-
-    plan.status = STATUS_PENDING
-    plan.requested_by = requested_by
-    _append_event(
-        db,
-        version_id=version.id,
-        event_type="requested",
-        user_id=requested_by,
-        details=f"Solicitud de firma a {len(version.signers)} firmante(s)",
-    )
-    db.commit()
-    return await get_plan(db, plan_id)
-
-
-async def cancel_signature_request(
-    db: Session,
-    plan_id: int,
-    *,
-    cancelled_by: int,
-) -> WorkPlan:
-    plan = db.query(WorkPlan).filter(WorkPlan.id == plan_id).first()
-    if not plan:
-        raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
-    if plan.status != STATUS_PENDING:
-        raise WorkPlanValidationError(
-            "Solo se cancela un plan en pending_signature"
-        )
-    plan.status = STATUS_DRAFT
-    if plan.current_version_id:
-        _append_event(
-            db,
-            version_id=plan.current_version_id,
-            event_type="cancelled",
-            user_id=cancelled_by,
-            details="Solicitud de firma cancelada; vuelve a draft",
-        )
-    db.commit()
-    return await get_plan(db, plan_id)
-
-
-async def mark_viewed(
-    db: Session,
-    plan_id: int,
-    *,
-    user_id: int,
-) -> None:
-    """Las vistas ya no se guardan: saturaban el historial del plan."""
-    _ = (db, plan_id, user_id)
-
-
-async def sign_plan(
-    db: Session,
-    plan_id: int,
-    data: WorkPlanSignRequest,
-    *,
-    user_id: int,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-) -> Dict[str, Any]:
-    plan = db.query(WorkPlan).filter(WorkPlan.id == plan_id).first()
-    if not plan:
-        raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
-    if plan.status != STATUS_PENDING:
-        raise WorkPlanValidationError(
-            f"El plan debe estar pending_signature (actual: {plan.status})"
-        )
-    if data.signature_type not in SIGNATURE_TYPES:
-        raise WorkPlanValidationError(
-            f"signatureType inválido. Valores: {', '.join(SIGNATURE_TYPES)}"
-        )
-    _assert_no_secrets(data.signature_data)
-
-    version = _load_version(db, plan.current_version_id)
-    signer = next((s for s in version.signers if s.user_id == user_id), None)
-    if not signer:
-        raise WorkPlanValidationError("No eres firmante de esta versión")
-    if signer.status == SIGNER_SIGNED:
-        raise WorkPlanConflictError("Ya firmaste esta versión")
-    if signer.status == SIGNER_REJECTED:
-        raise WorkPlanValidationError(
-            "Rechazaste esta versión; no puedes firmar"
-        )
-
-    now = datetime.utcnow()
-    signer.status = SIGNER_SIGNED
-    signer.signed_at = now
-
-    sig = WorkPlanSignature(
-        work_plan_signer_id=signer.id,
-        user_id=user_id,
-        signature_type=data.signature_type,
-        signature_data=data.signature_data,
-        signed_at=now,
-        ip_address=ip_address,
-        user_agent=(user_agent[:500] if user_agent else None),
-    )
-    db.add(sig)
-    _append_event(
-        db,
-        version_id=version.id,
-        event_type="signed",
-        user_id=user_id,
-        details=f"{_user_display(signer.user) or 'Firmante'} firmó ({data.signature_type})",
-    )
-
-    # ¿Todos firmaron?
-    db.flush()
-    version = _load_version(db, version.id)
-    all_signed = all(s.status == SIGNER_SIGNED for s in version.signers)
-    if all_signed:
-        plan.status = STATUS_SIGNED
-        version.signed_at = now
-
-    db.commit()
-    return {
-        "workPlan": plan_to_dict(await get_plan(db, plan_id)),
-        "signer": signer_to_dict(
-            db.query(WorkPlanSigner)
-            .options(joinedload(WorkPlanSigner.user).joinedload(User.person))
-            .filter(WorkPlanSigner.id == signer.id)
-            .first()
-        ),
-        "fullySigned": all_signed,
-    }
-
-
-async def reject_plan(
-    db: Session,
-    plan_id: int,
-    data: WorkPlanRejectRequest,
-    *,
-    user_id: int,
-) -> Dict[str, Any]:
-    plan = db.query(WorkPlan).filter(WorkPlan.id == plan_id).first()
-    if not plan:
-        raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
-    if plan.status != STATUS_PENDING:
-        raise WorkPlanValidationError(
-            f"El plan debe estar pending_signature (actual: {plan.status})"
-        )
-
-    version = _load_version(db, plan.current_version_id)
-    signer = next((s for s in version.signers if s.user_id == user_id), None)
-    if not signer:
-        raise WorkPlanValidationError("No eres firmante de esta versión")
-    if signer.status != SIGNER_PENDING:
-        raise WorkPlanValidationError(
-            f"Firmante en status={signer.status}; no se puede rechazar"
-        )
-
-    now = datetime.utcnow()
-    signer.status = SIGNER_REJECTED
-    signer.rejected_at = now
-    signer.rejection_reason = data.reason.strip()
-    plan.status = STATUS_REJECTED
-
-    _append_event(
-        db,
-        version_id=version.id,
-        event_type="rejected",
-        user_id=user_id,
-        details=data.reason.strip(),
-    )
-    db.commit()
-    return {
-        "workPlan": plan_to_dict(await get_plan(db, plan_id)),
-        "signer": signer_to_dict(
-            db.query(WorkPlanSigner)
-            .options(joinedload(WorkPlanSigner.user).joinedload(User.person))
-            .filter(WorkPlanSigner.id == signer.id)
-            .first()
-        ),
-    }
-
 
 async def create_new_version(
     db: Session,
@@ -1270,13 +693,13 @@ async def create_new_version(
         raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
     if plan.status == STATUS_PENDING:
         raise WorkPlanValidationError(
-            "Cancela la solicitud de firma antes de crear nueva versión"
+            "Este plan ya se puede editar. No hace falta otra versión."
         )
     if plan.status == STATUS_DRAFT and plan.current_version_id:
         # Permitir solo si queremos iterar desde rejected → ya es draft vía cancel
         # Para signed/rejected creamos nueva; si draft, error
         raise WorkPlanValidationError(
-            "Ya hay un draft. Edítalo o solicita firma."
+            "Ya hay un borrador. Edítalo directo."
         )
     if plan.status not in (STATUS_SIGNED, STATUS_REJECTED):
         raise WorkPlanValidationError(
@@ -1341,6 +764,89 @@ async def create_new_version(
 
 
 # ---------- Comparación 7.3 ----------
+
+
+async def add_activity_to_period(
+    db: Session,
+    data: TaskAddToPeriod,
+    *,
+    created_by: int,
+) -> Dict[str, Any]:
+    justification = data.justification.strip()
+    if len(justification) < 8:
+        raise WorkPlanValidationError("Escribe la justificación de la actividad.")
+
+    plan = _period_plan(db, data.obra_id)
+    if not plan or not plan.current_version_id:
+        raise WorkPlanValidationError(
+            "Esta obra no tiene un periodo de planificación. "
+            "Crea el plan antes de agregar actividades."
+        )
+
+    if data.template_id:
+        task = add_task_from_catalog(
+            db,
+            TaskCreateFromTemplate(
+                obra_id=data.obra_id,
+                template_id=data.template_id,
+                name=data.name,
+                description=data.description,
+                planned_start_date=plan.start_date,
+                planned_end_date=plan.end_date,
+                copy_subtasks=False,
+                instantiate_dependencies=False,
+            ),
+            created_by=created_by,
+        )
+    else:
+        if not data.name or not data.name.strip():
+            raise WorkPlanValidationError("El nombre de la actividad es obligatorio.")
+        if (
+            data.chapter_id is None
+            or data.budget_activity_id is None
+            or data.zone_id is None
+        ):
+            raise WorkPlanValidationError(
+                "Indica capítulo, actividad presupuestal y zona."
+            )
+        task = add_unique_obra_task(
+            db,
+            obra_id=data.obra_id,
+            name=data.name,
+            description=data.description,
+            planned_start_date=plan.start_date,
+            planned_end_date=plan.end_date,
+            created_by=created_by,
+            chapter_id=data.chapter_id,
+            budget_activity_id=data.budget_activity_id,
+            zone_id=data.zone_id,
+        )
+
+    version = _load_version(db, plan.current_version_id)
+    if not version:
+        raise WorkPlanValidationError("El plan no tiene versión para agregar la actividad")
+    already = any(row.task_id == task.id for row in (version.tasks or []))
+    if not already:
+        loaded = (
+            db.query(Task)
+            .options(joinedload(Task.unit))
+            .filter(Task.id == task.id)
+            .first()
+        )
+        db.add(_snapshot_from_task(db, version_id=version.id, task=loaded or task))
+    _append_event(
+        db,
+        version_id=version.id,
+        event_type="edited",
+        user_id=created_by,
+        details=f"Se añadió «{task.name}». Justificación: {justification}",
+    )
+    db.commit()
+    return {
+        "task": task_to_dict(await get_task(db, task.id)),
+        "work_plan": plan_to_dict(await get_plan(db, plan.id)),
+        "justification": justification,
+    }
 
 
 async def compare_version(

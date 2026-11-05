@@ -17,8 +17,10 @@ class TaskChapter(Base):
         ForeignKey("obra_stages.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=True,
     )
-    # % que este capítulo aporta al 100% de su etapa
+    # % que este capítulo aporta al 100% de la obra
     weight_percent = Column(Numeric(6, 2), nullable=True)
+    # 1 = el mismo avance se muestra en todas las zonas
+    is_global = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())

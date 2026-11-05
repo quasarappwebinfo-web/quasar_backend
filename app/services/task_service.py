@@ -9,6 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -18,6 +19,7 @@ from app.models import (
     Obra,
     Task,
     TaskAssignment,
+    TaskBudgetActivity,
     TaskChapter,
     TaskComment,
     TaskCrewAssignment,
@@ -34,6 +36,7 @@ from app.models import (
     TaskTemplateMeasurement,
     TaskTemplateSubtask,
     TaskTemplateVersion,
+    TaskZone,
     User,
     UserNotification,
     Worker,
@@ -154,26 +157,15 @@ def _user_display(user: Optional[User]) -> Optional[str]:
 
 def task_to_dict(row: Task, *, enrich: bool = True) -> Dict[str, Any]:
     tpl = _catalog_template(row)
-    chapter_id = None
-    chapter_name = None
-    zone_id = None
-    zone_name = None
-    budget_activity_id = None
-    budget_activity_name = None
-    template_code = None
-    template_name = None
-    if tpl:
-        template_code = tpl.code
-        template_name = tpl.name
-        if tpl.chapter:
-            chapter_id = tpl.chapter.id
-            chapter_name = tpl.chapter.name
-        if tpl.zone:
-            zone_id = tpl.zone.id
-            zone_name = tpl.zone.name
-        if tpl.budget_activity:
-            budget_activity_id = tpl.budget_activity.id
-            budget_activity_name = tpl.budget_activity.name
+    chapter, activity, zone = _task_placement(row)
+    chapter_id = chapter.id if chapter else None
+    chapter_name = chapter.name if chapter else None
+    zone_id = zone.id if zone else None
+    zone_name = zone.name if zone else None
+    budget_activity_id = activity.id if activity else None
+    budget_activity_name = activity.name if activity else None
+    template_code = tpl.code if tpl else None
+    template_name = tpl.name if tpl else None
 
     data: Dict[str, Any] = {
         "id": row.id,
@@ -732,13 +724,61 @@ def _weighted_progress(
     )
 
 
+def _percent_share(part: int, total: int) -> Decimal:
+    if total <= 0 or part <= 0:
+        return Decimal("0.00")
+    return (Decimal(100) * Decimal(part) / Decimal(total)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+def _task_placement(task: Task):
+    """Capítulo, presupuestal y zona guardados en la tarea, o los de su plantilla."""
+    if task.chapter_id or task.budget_activity_id or task.zone_id:
+        return task.chapter, task.budget_activity, task.zone
+    template = _catalog_template(task)
+    if not template:
+        return None, None, None
+    return template.chapter, template.budget_activity, template.zone
+
+
+def _bind_placement(
+    db: Session,
+    task: Task,
+    *,
+    chapter_id: int,
+    budget_activity_id: int,
+    zone_id: int,
+) -> None:
+    chapter = db.query(TaskChapter).filter(TaskChapter.id == chapter_id).first()
+    if not chapter:
+        raise TaskOpValidationError(f"No existe el capítulo {chapter_id}")
+    activity = (
+        db.query(TaskBudgetActivity)
+        .filter(TaskBudgetActivity.id == budget_activity_id)
+        .first()
+    )
+    if not activity:
+        raise TaskOpValidationError(
+            f"No existe la actividad presupuestal {budget_activity_id}"
+        )
+    if activity.chapter_id != chapter.id:
+        raise TaskOpValidationError(
+            "La actividad presupuestal no pertenece al capítulo"
+        )
+    zone = db.query(TaskZone).filter(TaskZone.id == zone_id).first()
+    if not zone:
+        raise TaskOpValidationError(f"No existe la zona {zone_id}")
+    task.chapter_id = chapter.id
+    task.budget_activity_id = activity.id
+    task.zone_id = zone.id
+
+
 def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
-    """Arma capítulos y el avance ponderado de un conjunto de actividades."""
+    """Cada actividad de un capítulo vale lo mismo. El % del capítulo no se toca."""
     chapters: Dict[Optional[int], Dict[str, Any]] = {}
     for task in tasks:
-        template = _catalog_template(task)
-        chapter = template.chapter if template else None
-        activity = template.budget_activity if template else None
+        chapter, activity, _zone = _task_placement(task)
         chapter_id = chapter.id if chapter else None
         activity_id = activity.id if activity else None
         chapter_bucket = chapters.setdefault(
@@ -752,61 +792,65 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
     def _chapter_sort(item: Dict[str, Any]):
         chapter = item["chapter"]
         if chapter is None:
-            return (1, 0, "")
-        return (0, chapter.display_order or 0, chapter.name or "")
+            return (1, "")
+        return (0, chapter.name or "")
 
     chapter_rows = []
-    stage_groups: Dict[int, Dict[str, Any]] = {}
-    loose: List[Tuple[Optional[Decimal], Decimal]] = []
+    obra_parts: List[Tuple[Optional[int], Optional[Decimal], Decimal]] = []
     for bucket in sorted(chapters.values(), key=_chapter_sort):
         chapter = bucket["chapter"]
+        grouped = list(bucket["activities"].values())
+        chapter_tasks = [task for group in grouped for task in group["tasks"]]
+        total = len(chapter_tasks)
+        each_share = _percent_share(1, total)
+        chapter_progress = (
+            sum((_task_progress_percent(task) for task in chapter_tasks), Decimal("0"))
+            / Decimal(total)
+        ).quantize(Decimal("1"), rounding=ROUND_HALF_UP) if total else Decimal("0")
         activity_rows = []
-        chapter_parts: List[Tuple[Optional[Decimal], Decimal]] = []
-        activities = sorted(
-            bucket["activities"].values(),
+        for activity_bucket in sorted(
+            grouped,
             key=lambda b: (
                 1 if b["activity"] is None else 0,
-                0 if b["activity"] is None else (b["activity"].display_order or 0),
                 "" if b["activity"] is None else (b["activity"].name or ""),
             ),
-        )
-        for activity_bucket in activities:
+        ):
             activity = activity_bucket["activity"]
-            progress = _weighted_progress(
-                [
-                    (
-                        (
-                            _catalog_template(t).budget_weight_percent
-                            if _catalog_template(t)
-                            else t.budget_weight_percent
-                        ),
-                        _task_progress_percent(t),
-                    )
-                    for t in activity_bucket["tasks"]
-                ]
-            )
-            weight = activity.chapter_weight_percent if activity else None
-            chapter_parts.append((weight, progress))
+            group_tasks = activity_bucket["tasks"]
+            group_progress = (
+                sum(
+                    (_task_progress_percent(task) for task in group_tasks),
+                    Decimal("0"),
+                )
+                / Decimal(len(group_tasks))
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
             activity_rows.append(
                 {
                     "budget_activity_id": activity.id if activity else None,
                     "budget_activity_name": (
                         activity.name if activity else "Sin actividad presupuestal"
                     ),
-                    "weight_percent": weight,
-                    "progress_percent": progress,
+                    "weight_percent": _percent_share(len(group_tasks), total),
+                    "progress_percent": group_progress,
+                    "activities": [
+                        {
+                            "task_id": task.id,
+                            "task_name": task.name,
+                            "share_percent": each_share,
+                            "progress_percent": _task_progress_percent(task),
+                        }
+                        for task in sorted(group_tasks, key=lambda row: row.name or "")
+                    ],
                 }
             )
-        chapter_progress = _weighted_progress(chapter_parts)
         chapter_weight = chapter.weight_percent if chapter else None
-        if chapter is not None and chapter.stage_id:
-            group = stage_groups.setdefault(
-                chapter.stage_id,
-                {"stage": chapter.stage, "parts": []},
-            )
-            group["parts"].append((chapter_weight, chapter_progress))
-        else:
-            loose.append((chapter_weight, chapter_progress))
+        raw_progress = (
+            sum((_task_progress_percent(task) for task in chapter_tasks), Decimal("0"))
+            / Decimal(total)
+            if total
+            else Decimal("0")
+        )
+        obra_parts.append((chapter.id if chapter else None, chapter_weight, raw_progress))
         chapter_rows.append(
             {
                 "chapter_id": chapter.id if chapter else None,
@@ -816,19 +860,100 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
                 "budget_activities": activity_rows,
             }
         )
-    obra_parts = list(loose)
-    for group in stage_groups.values():
-        stage = group["stage"]
-        obra_parts.append(
-            (
-                stage.weight_percent if stage is not None else None,
-                _weighted_progress(group["parts"]),
-            )
-        )
     return {
-        "progress_percent": _weighted_progress(obra_parts),
         "chapters": chapter_rows,
+        "parts": obra_parts,
     }
+
+
+def _house_progress(
+    parts: List[Tuple[Optional[int], Optional[Decimal], Decimal]],
+    catalog_chapters: List[TaskChapter],
+) -> Decimal:
+    """Suma el aporte real de cada capítulo a la casa. 1% al 80% son 0,80 puntos."""
+    progress_by_id = {
+        chapter_id: progress
+        for chapter_id, _weight, progress in parts
+        if chapter_id is not None
+    }
+    total = Decimal("0")
+    seen = set()
+    for chapter in catalog_chapters:
+        seen.add(chapter.id)
+        weight = Decimal(str(chapter.weight_percent or 0))
+        progress = progress_by_id.get(chapter.id, Decimal("0"))
+        total += weight * progress / Decimal(100)
+    for chapter_id, weight, progress in parts:
+        if chapter_id is None or chapter_id in seen:
+            continue
+        total += Decimal(str(weight or 0)) * progress / Decimal(100)
+    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _average_progress(tasks: List[Task]) -> Decimal:
+    if not tasks:
+        return Decimal("0")
+    return (
+        sum((_task_progress_percent(task) for task in tasks), Decimal("0"))
+        / Decimal(len(tasks))
+    ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
+def _zone_board(
+    tasks: List[Task],
+    catalog_chapters: List[TaskChapter],
+    catalog_zones: List[TaskZone],
+) -> List[Dict[str, Any]]:
+    """Cada zona lista todos los capítulos. El global repite el mismo avance."""
+    by_chapter: Dict[int, List[Task]] = {}
+    by_chapter_zone: Dict[Tuple[int, int], List[Task]] = {}
+    for task in tasks:
+        chapter, _activity, zone = _task_placement(task)
+        if not chapter:
+            continue
+        by_chapter.setdefault(chapter.id, []).append(task)
+        if zone:
+            by_chapter_zone.setdefault((chapter.id, zone.id), []).append(task)
+
+    chapters = sorted(
+        catalog_chapters,
+        key=lambda row: (row.display_order or 0, row.name or ""),
+    )
+    zones = sorted(
+        catalog_zones,
+        key=lambda row: (row.display_order or 0, row.name or ""),
+    )
+    board = []
+    for zone in zones:
+        rows = []
+        for chapter in chapters:
+            if chapter.is_global == 1:
+                progress = _average_progress(by_chapter.get(chapter.id, []))
+            else:
+                progress = _average_progress(
+                    by_chapter_zone.get((chapter.id, zone.id), [])
+                )
+            rows.append(
+                {
+                    "chapter_id": chapter.id,
+                    "chapter_name": chapter.name,
+                    "progress_percent": progress,
+                    "is_global": 1 if chapter.is_global == 1 else 0,
+                }
+            )
+        board.append(
+            {
+                "zone_id": zone.id,
+                "zone_name": zone.name,
+                "chapters": rows,
+            }
+        )
+    return board
+
+
+def _plain_progress(tasks: List[Task]) -> Decimal:
+    """Cuánto de este conjunto está hecho, sin convertirlo en porcentaje de la casa."""
+    return _average_progress(tasks)
 
 
 def _activity_status(tasks: List[Task]) -> Dict[str, int]:
@@ -860,10 +985,10 @@ def _period_plan(db: Session, obra_id: int) -> Optional[WorkPlan]:
     ]
     pool = covering or plans
     rank = {
+        "draft": 0,
+        "pending_signature": 0,
         "signed": 0,
-        "pending_signature": 1,
-        "draft": 2,
-        "rejected": 3,
+        "rejected": 1,
     }
     pool.sort(
         key=lambda plan: (
@@ -885,6 +1010,9 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
         db.query(Task)
         .options(
             joinedload(Task.subtasks),
+            joinedload(Task.chapter),
+            joinedload(Task.budget_activity),
+            joinedload(Task.zone),
             joinedload(Task.source_template).options(
                 joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
                 joinedload(TaskTemplate.budget_activity),
@@ -908,6 +1036,10 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
         unique.append(task)
     tasks = unique
     built = _chapters_from_tasks(tasks)
+    catalog_chapters = (
+        db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
+    )
+    catalog_zones = db.query(TaskZone).filter(TaskZone.is_active == 1).all()
     plan = _period_plan(db, obra_id)
     period = None
     status_tasks = tasks
@@ -919,20 +1051,20 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
             .all()
         }
         period_tasks = [task for task in tasks if task.id in period_ids]
-        period_built = _chapters_from_tasks(period_tasks)
         status_tasks = period_tasks
         period = {
             "plan_id": plan.id,
             "plan_name": plan.name,
             "start_date": plan.start_date,
             "end_date": plan.end_date,
-            "progress_percent": period_built["progress_percent"],
+            "progress_percent": _plain_progress(period_tasks),
         }
 
     return {
         "obra_id": obra_id,
-        "progress_percent": built["progress_percent"],
+        "progress_percent": _house_progress(built["parts"], catalog_chapters),
         "chapters": built["chapters"],
+        "zones": _zone_board(tasks, catalog_chapters, catalog_zones),
         "period": period,
         "activity_status": _activity_status(status_tasks),
     }
@@ -1024,6 +1156,9 @@ def add_task_from_catalog(
         planned_end_date=data.planned_end_date,
         status=STATUS_SCHEDULED,
         budget_weight_percent=tpl.budget_weight_percent,
+        chapter_id=tpl.chapter_id,
+        budget_activity_id=tpl.budget_activity_id,
+        zone_id=tpl.zone_id,
         created_by=created_by,
     )
     db.add(task)
@@ -1108,6 +1243,9 @@ def _add_task_from_published_version(
         planned_end_date=data.planned_end_date,
         status=STATUS_SCHEDULED,
         budget_weight_percent=tpl.budget_weight_percent if tpl else None,
+        chapter_id=tpl.chapter_id if tpl else None,
+        budget_activity_id=tpl.budget_activity_id if tpl else None,
+        zone_id=tpl.zone_id if tpl else None,
         created_by=created_by,
     )
     db.add(task)
@@ -1123,7 +1261,7 @@ def _add_task_from_published_version(
     )
 
     if data.copy_subtasks:
-        for st in sorted(version.subtasks or [], key=lambda s: s.display_order):
+        for st in sorted(version.subtasks or [], key=lambda s: s.id or 0):
             child_uuid = str(uuid_lib.uuid4())
             child = Task(
                 uuid=child_uuid,
@@ -1242,6 +1380,9 @@ def add_unique_obra_task(
     planned_start_date,
     planned_end_date,
     created_by: int,
+    chapter_id: int,
+    budget_activity_id: int,
+    zone_id: int,
 ) -> Task:
     """Actividad que existe solo en esta obra. No entra al pool. No hace commit."""
     obra = db.query(Obra).filter(Obra.id == obra_id).first()
@@ -1262,6 +1403,13 @@ def add_unique_obra_task(
         planned_end_date=planned_end_date,
         status=STATUS_SCHEDULED,
         created_by=created_by,
+    )
+    _bind_placement(
+        db,
+        task,
+        chapter_id=chapter_id,
+        budget_activity_id=budget_activity_id,
+        zone_id=zone_id,
     )
     db.add(task)
     db.flush()
@@ -1309,6 +1457,15 @@ async def create_task_manual(
     uid = _new_uuid(data.uuid)
     _assert_uuid_free(db, Task, uid, "Tarea")
 
+    if data.parent_task_id is None and (
+        data.chapter_id is None
+        or data.budget_activity_id is None
+        or data.zone_id is None
+    ):
+        raise TaskOpValidationError(
+            "Indica capítulo, actividad presupuestal y zona."
+        )
+
     task = Task(
         uuid=uid,
         obra_id=data.obra_id,
@@ -1325,6 +1482,14 @@ async def create_task_manual(
         weight_percent=data.weight_percent,
         created_by=created_by,
     )
+    if data.parent_task_id is None:
+        _bind_placement(
+            db,
+            task,
+            chapter_id=data.chapter_id,
+            budget_activity_id=data.budget_activity_id,
+            zone_id=data.zone_id,
+        )
     db.add(task)
     db.flush()
     _append_history(
@@ -2207,7 +2372,10 @@ async def list_obra_photo_gallery(
             .joinedload(TaskTemplate.budget_activity),
         )
         .filter(Task.obra_id == obra_id)
-        .order_by(TaskPhoto.created_at.desc(), TaskPhoto.id.desc())
+        .order_by(
+            func.coalesce(TaskPhoto.taken_at, TaskPhoto.created_at).desc(),
+            TaskPhoto.id.desc(),
+        )
         .all()
     )
 
@@ -2254,7 +2422,10 @@ async def list_obra_photo_gallery(
     if include_obra:
         items.extend(list_gallery_items(db, obra_id))
         items.sort(
-            key=lambda row: (row.get("created_at") or datetime.min, row["id"]),
+            key=lambda row: (
+                row.get("taken_at") or row.get("created_at") or datetime.min,
+                row["id"],
+            ),
             reverse=True,
         )
 

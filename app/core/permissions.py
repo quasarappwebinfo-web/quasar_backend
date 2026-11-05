@@ -72,7 +72,7 @@ PERMISSION_CATALOG: tuple[Dict[str, str], ...] = (
     {
         "code": PERMISSION_PLANIFICACION,
         "label": "Planificación y firmas",
-        "description": "Planes de trabajo, firmantes y comparación",
+        "description": "Planes de trabajo y comparación",
     },
     {
         "code": PERMISSION_SYNC,

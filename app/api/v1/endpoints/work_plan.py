@@ -3,7 +3,7 @@ Endpoints planificación — /api/v1/planificacion/planes
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_PLANIFICACION
@@ -13,12 +13,9 @@ from app.schemas import (
     WorkPlanCompareResponse,
     WorkPlanCreate,
     WorkPlanNewVersionRequest,
-    WorkPlanRejectRequest,
     WorkPlanResponse,
     WorkPlanSignatureEventResponse,
-    WorkPlanSignerAdd,
     WorkPlanSignerResponse,
-    WorkPlanSignRequest,
     WorkPlanTaskAdd,
     WorkPlanTaskResponse,
     WorkPlanUpdate,
@@ -108,7 +105,7 @@ async def list_unfinished(
         _err(e)
 
 
-@router.get("/{plan_id}", summary="Detalle: versiones, snapshots, firmantes, eventos")
+@router.get("/{plan_id}", summary="Detalle: versiones, snapshots y eventos")
 async def get_detail(
     plan_id: int,
     db: Session = Depends(get_db),
@@ -184,42 +181,6 @@ async def compare(
 
 
 @router.post(
-    "/{plan_id}/solicitar-firma",
-    summary="draft/rejected → pending_signature",
-)
-async def request_signature(
-    plan_id: int,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        row = await svc.request_signatures(
-            db, plan_id, requested_by=user_auth.id
-        )
-        return _plan(svc.plan_to_dict(row))
-    except svc.WorkPlanError as e:
-        _err(e)
-
-
-@router.post(
-    "/{plan_id}/cancelar-firma",
-    summary="pending_signature → draft",
-)
-async def cancel_signature(
-    plan_id: int,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        row = await svc.cancel_signature_request(
-            db, plan_id, cancelled_by=user_auth.id
-        )
-        return _plan(svc.plan_to_dict(row))
-    except svc.WorkPlanError as e:
-        _err(e)
-
-
-@router.post(
     "/{plan_id}/vista",
     summary="Compatibilidad: ya no registra vistas en el historial",
 )
@@ -231,57 +192,6 @@ async def mark_viewed(
     try:
         await svc.mark_viewed(db, plan_id, user_id=user_auth.id)
         return {"ok": True}
-    except svc.WorkPlanError as e:
-        _err(e)
-
-
-@router.post("/{plan_id}/firmar", summary="Firmar versión actual (firmante)")
-async def sign(
-    plan_id: int,
-    data: WorkPlanSignRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        ip = request.client.host if request.client else None
-        ua = request.headers.get("user-agent")
-        result = await svc.sign_plan(
-            db,
-            plan_id,
-            data,
-            user_id=user_auth.id,
-            ip_address=ip,
-            user_agent=ua,
-        )
-        return {
-            "workPlan": _plan(result["workPlan"]),
-            "signer": WorkPlanSignerResponse(**result["signer"]).model_dump(
-                by_alias=True
-            ),
-            "fullySigned": result["fullySigned"],
-        }
-    except svc.WorkPlanError as e:
-        _err(e)
-
-
-@router.post("/{plan_id}/rechazar", summary="Rechazar (firmante) → rejected")
-async def reject(
-    plan_id: int,
-    data: WorkPlanRejectRequest,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        result = await svc.reject_plan(
-            db, plan_id, data, user_id=user_auth.id
-        )
-        return {
-            "workPlan": _plan(result["workPlan"]),
-            "signer": WorkPlanSignerResponse(**result["signer"]).model_dump(
-                by_alias=True
-            ),
-        }
     except svc.WorkPlanError as e:
         _err(e)
 
@@ -306,7 +216,7 @@ async def new_version(
         _err(e)
 
 
-# --- Versión: tareas / firmantes ---
+# --- Versión: tareas ---
 
 
 @router.post(
@@ -348,40 +258,3 @@ async def remove_task(
     except svc.WorkPlanError as e:
         _err(e)
 
-
-@router.post(
-    "/versiones/{version_id}/firmantes",
-    status_code=status.HTTP_201_CREATED,
-    summary="Agregar firmante (draft)",
-)
-async def add_signer(
-    version_id: int,
-    data: WorkPlanSignerAdd,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        row = await svc.add_signer(
-            db, version_id, data, edited_by=user_auth.id
-        )
-        return WorkPlanSignerResponse(**svc.signer_to_dict(row)).model_dump(
-            by_alias=True
-        )
-    except svc.WorkPlanError as e:
-        _err(e)
-
-
-@router.delete(
-    "/firmantes/{signer_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Quitar firmante (draft)",
-)
-async def remove_signer(
-    signer_id: int,
-    db: Session = Depends(get_db),
-    user_auth: User = Depends(require_permission(PERMISSION_PLANIFICACION)),
-):
-    try:
-        await svc.remove_signer(db, signer_id, edited_by=user_auth.id)
-    except svc.WorkPlanError as e:
-        _err(e)

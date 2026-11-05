@@ -25,14 +25,18 @@ def build_catalog_router(
     create_model: Type[BaseModel],
     update_model: Type[BaseModel],
     collection_key: str,
-    create_fn: Callable,
+    create_fn: Optional[Callable] = None,
     get_fn: Callable,
     list_fn: Callable,
-    update_fn: Callable,
+    update_fn: Optional[Callable] = None,
     to_dict_fn: Callable,
     entity_summary: str,
     supports_position_filter: bool = False,
+    allow_writes: bool = True,
 ) -> APIRouter:
+    if allow_writes and (create_fn is None or update_fn is None):
+        raise ValueError(f"El catálogo {entity_summary} permite escrituras sin funciones")
+
     router = APIRouter(prefix=prefix, tags=tags)
 
     @router.get(
@@ -66,24 +70,26 @@ def build_catalog_router(
         ]
         return {collection_key: items, "pagination": result["pagination"]}
 
-    @router.post(
-        "",
-        summary=f"Crear {entity_summary}",
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def create_item(
-        data: create_model,  # type: ignore[valid-type]
-        db: Session = Depends(get_db),
-        user_auth: User = Depends(require_permission(PERMISSION_CATALOGOS)),
-    ):
-        _ = user_auth
-        try:
-            row = await create_fn(db=db, data=data)
-            return response_model(**to_dict_fn(row)).model_dump(by_alias=True)
-        except CatalogAlreadyExistsError as e:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-        except CatalogValidationError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    if allow_writes:
+
+        @router.post(
+            "",
+            summary=f"Crear {entity_summary}",
+            status_code=status.HTTP_201_CREATED,
+        )
+        async def create_item(
+            data: create_model,  # type: ignore[valid-type]
+            db: Session = Depends(get_db),
+            user_auth: User = Depends(require_permission(PERMISSION_CATALOGOS)),
+        ):
+            _ = user_auth
+            try:
+                row = await create_fn(db=db, data=data)
+                return response_model(**to_dict_fn(row)).model_dump(by_alias=True)
+            except CatalogAlreadyExistsError as e:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+            except CatalogValidationError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     @router.get(
         "/{item_id}",
@@ -101,26 +107,30 @@ def build_catalog_router(
         except CatalogNotFoundError as e:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    @router.put(
-        "/{item_id}",
-        summary=f"Actualizar {entity_summary}",
-        description="Actualización parcial. isActive: 1=activo, 2=inactivo.",
-    )
-    async def update_item(
-        item_id: int,
-        data: update_model,  # type: ignore[valid-type]
-        db: Session = Depends(get_db),
-        user_auth: User = Depends(require_permission(PERMISSION_CATALOGOS)),
-    ):
-        _ = user_auth
-        try:
-            row = await update_fn(db=db, item_id=item_id, data=data)
-            return response_model(**to_dict_fn(row)).model_dump(by_alias=True)
-        except CatalogNotFoundError as e:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-        except CatalogAlreadyExistsError as e:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-        except CatalogValidationError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    if allow_writes:
+
+        @router.put(
+            "/{item_id}",
+            summary=f"Actualizar {entity_summary}",
+            description="Actualización parcial. isActive: 1=activo, 2=inactivo.",
+        )
+        async def update_item(
+            item_id: int,
+            data: update_model,  # type: ignore[valid-type]
+            db: Session = Depends(get_db),
+            user_auth: User = Depends(require_permission(PERMISSION_CATALOGOS)),
+        ):
+            _ = user_auth
+            try:
+                row = await update_fn(db=db, item_id=item_id, data=data)
+                return response_model(**to_dict_fn(row)).model_dump(by_alias=True)
+            except CatalogNotFoundError as e:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+            except CatalogAlreadyExistsError as e:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+            except CatalogValidationError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+                )
 
     return router

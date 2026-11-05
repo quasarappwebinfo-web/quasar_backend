@@ -17,12 +17,8 @@ from app.models import (
 from app.schemas import (
     DelayReasonCreate,
     DelayReasonUpdate,
-    DocumentTypeCreate,
-    DocumentTypeUpdate,
     MeasurementUnitCreate,
     MeasurementUnitUpdate,
-    ObraSaleTypeCreate,
-    ObraSaleTypeUpdate,
     ObraStageCreate,
     ObraStageUpdate,
     SpecialtyCreate,
@@ -300,16 +296,6 @@ def measurement_unit_to_dict(row) -> Dict[str, Any]:
 # --- Tipos de documento ---
 
 
-async def create_document_type(db: Session, data: DocumentTypeCreate):
-    return create_catalog_item(
-        db,
-        model=DocumentType,
-        data=data,
-        fields=DOC_TYPE_FIELDS,
-        label="tipo de documento",
-    )
-
-
 async def get_document_type(db: Session, item_id: int):
     return get_catalog_item(
         db, model=DocumentType, item_id=item_id, label="tipo de documento"
@@ -334,32 +320,11 @@ async def list_document_types(
     )
 
 
-async def update_document_type(db: Session, item_id: int, data: DocumentTypeUpdate):
-    return update_catalog_item(
-        db,
-        model=DocumentType,
-        item_id=item_id,
-        data=data,
-        fields=DOC_TYPE_FIELDS,
-        label="tipo de documento",
-    )
-
-
 def document_type_to_dict(row) -> Dict[str, Any]:
     return catalog_to_dict(row, DOC_TYPE_FIELDS)
 
 
 # --- Tipos de venta de obra ---
-
-
-async def create_obra_sale_type(db: Session, data: ObraSaleTypeCreate):
-    return create_catalog_item(
-        db,
-        model=ObraSaleType,
-        data=data,
-        fields=SALE_TYPE_FIELDS,
-        label="tipo de venta",
-    )
 
 
 async def get_obra_sale_type(db: Session, item_id: int):
@@ -382,17 +347,6 @@ async def list_obra_sale_types(
         page=page,
         search=search,
         active_only=active_only,
-    )
-
-
-async def update_obra_sale_type(db: Session, item_id: int, data: ObraSaleTypeUpdate):
-    return update_catalog_item(
-        db,
-        model=ObraSaleType,
-        item_id=item_id,
-        data=data,
-        fields=SALE_TYPE_FIELDS,
-        label="tipo de venta",
     )
 
 

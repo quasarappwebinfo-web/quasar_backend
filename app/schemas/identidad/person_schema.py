@@ -26,3 +26,5 @@ class PersonResponse(BaseResponseSchema):
     name: str
     photo_url: Optional[str] = None
     created_at: Optional[datetime] = None
+    is_user: bool = False
+    is_worker: bool = False
