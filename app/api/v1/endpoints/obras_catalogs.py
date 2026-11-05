@@ -19,12 +19,11 @@ document_type_router = build_catalog_router(
     create_model=DocumentTypeCreate,
     update_model=DocumentTypeUpdate,
     collection_key="documentTypes",
-    create_fn=svc.create_document_type,
     get_fn=svc.get_document_type,
     list_fn=svc.list_document_types,
-    update_fn=svc.update_document_type,
     to_dict_fn=svc.document_type_to_dict,
     entity_summary="tipos de documento",
+    allow_writes=False,
 )
 
 obra_sale_type_router = build_catalog_router(
@@ -34,12 +33,11 @@ obra_sale_type_router = build_catalog_router(
     create_model=ObraSaleTypeCreate,
     update_model=ObraSaleTypeUpdate,
     collection_key="saleTypes",
-    create_fn=svc.create_obra_sale_type,
     get_fn=svc.get_obra_sale_type,
     list_fn=svc.list_obra_sale_types,
-    update_fn=svc.update_obra_sale_type,
     to_dict_fn=svc.obra_sale_type_to_dict,
     entity_summary="tipos de venta",
+    allow_writes=False,
 )
 
 obra_stage_router = build_catalog_router(

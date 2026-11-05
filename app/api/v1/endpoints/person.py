@@ -13,7 +13,7 @@ from app.services.person_service import (
     create_person,
     get_person,
     list_persons,
-    person_to_dict,
+    serialize_person,
     update_person,
 )
 
@@ -59,7 +59,7 @@ async def create_person_endpoint(
     _ = user_auth
     try:
         person = await create_person(db=db, data=data)
-        return PersonResponse(**person_to_dict(person)).model_dump(by_alias=True)
+        return PersonResponse(**serialize_person(db, person)).model_dump(by_alias=True)
     except PersonAlreadyExistsError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -80,7 +80,7 @@ async def get_person_endpoint(
     _ = user_auth
     try:
         person = await get_person(db=db, person_id=person_id)
-        return PersonResponse(**person_to_dict(person)).model_dump(by_alias=True)
+        return PersonResponse(**serialize_person(db, person)).model_dump(by_alias=True)
     except PersonNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -101,6 +101,6 @@ async def update_person_endpoint(
     _ = user_auth
     try:
         person = await update_person(db=db, person_id=person_id, data=data)
-        return PersonResponse(**person_to_dict(person)).model_dump(by_alias=True)
+        return PersonResponse(**serialize_person(db, person)).model_dump(by_alias=True)
     except PersonNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

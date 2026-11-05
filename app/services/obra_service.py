@@ -120,17 +120,12 @@ async def create_obra(db: Session, data: ObraCreate) -> Obra:
     _validate_status(data.status)
     _ensure_sale_type(db, data.sale_type_id)
 
-    if data.code:
-        exists = db.query(Obra).filter(Obra.code == data.code).first()
-        if exists:
-            raise ObraAlreadyExistsError(f"Ya existe una obra con code='{data.code}'")
-
     if data.current_stage_id is not None:
         _ensure_stage(db, data.current_stage_id)
 
     obra = Obra(
         name=data.name,
-        code=data.code,
+        code=None,
         sale_type_id=data.sale_type_id,
         address=data.address,
         city=data.city,
@@ -188,9 +183,7 @@ async def list_obras(
         query = query.filter(Obra.current_stage_id == current_stage_id)
     if search:
         term = f"%{search.strip()}%"
-        from sqlalchemy import or_
-
-        query = query.filter(or_(Obra.name.ilike(term), Obra.code.ilike(term)))
+        query = query.filter(Obra.name.ilike(term))
 
     total_items = query.count()
     rows = query.order_by(Obra.id.desc()).offset(offset).limit(limit_per_page).all()
@@ -217,17 +210,6 @@ async def update_obra(db: Session, obra_id: int, data: ObraUpdate) -> Obra:
         raise ObraValidationError("is_active debe ser 1 o 2")
     if "sale_type_id" in update_data and update_data["sale_type_id"] is not None:
         _ensure_sale_type(db, update_data["sale_type_id"])
-    if "code" in update_data and update_data["code"]:
-        conflict = (
-            db.query(Obra)
-            .filter(Obra.code == update_data["code"], Obra.id != obra_id)
-            .first()
-        )
-        if conflict:
-            raise ObraAlreadyExistsError(
-                f"Ya existe una obra con code='{update_data['code']}'"
-            )
-
     # current_stage_id no va por update genérico: usar change_obra_stage
     update_data.pop("current_stage_id", None)
 

@@ -250,7 +250,7 @@ async def upload_obra_gallery_photos(
 @router.post(
     "/agregar-al-periodo",
     status_code=status.HTTP_201_CREATED,
-    summary="Agregar actividad al periodo y pedir de nuevo la firma",
+    summary="Agregar actividad al periodo",
 )
 async def add_to_period(
     data: TaskAddToPeriod,

@@ -3,18 +3,57 @@ from typing import Any, Dict, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.models import Person
+from app.models import Person, User, Worker
 from app.schemas import PersonCreate, PersonUpdate
 
 
-def person_to_dict(person: Person) -> Dict[str, Any]:
+def person_to_dict(
+    person: Person,
+    *,
+    is_user: bool = False,
+    is_worker: bool = False,
+) -> Dict[str, Any]:
     return {
         "id": person.id,
         "document_number": person.document_number,
         "name": person.name,
         "photo_url": person.photo_url,
         "created_at": person.created_at,
+        "is_user": is_user,
+        "is_worker": is_worker,
     }
+
+
+def membership_flags(
+    db: Session, person_ids: list[int]
+) -> Dict[int, tuple[bool, bool]]:
+    """person_id -> (es usuario, es trabajador). Una persona puede ser ambas."""
+    if not person_ids:
+        return {}
+
+    user_ids = {
+        row[0]
+        for row in db.query(User.person_id)
+        .filter(User.person_id.in_(person_ids))
+        .all()
+    }
+    worker_ids = {
+        row[0]
+        for row in db.query(Worker.person_id)
+        .filter(Worker.person_id.in_(person_ids))
+        .all()
+    }
+    return {
+        person_id: (person_id in user_ids, person_id in worker_ids)
+        for person_id in person_ids
+    }
+
+
+def serialize_person(db: Session, person: Person) -> Dict[str, Any]:
+    is_user, is_worker = membership_flags(db, [person.id]).get(
+        person.id, (False, False)
+    )
+    return person_to_dict(person, is_user=is_user, is_worker=is_worker)
 
 
 class PersonAlreadyExistsError(Exception):
@@ -89,8 +128,16 @@ async def list_persons(
         .all()
     )
 
+    flags = membership_flags(db, [person.id for person in persons])
     return {
-        "persons": [person_to_dict(p) for p in persons],
+        "persons": [
+            person_to_dict(
+                person,
+                is_user=flags.get(person.id, (False, False))[0],
+                is_worker=flags.get(person.id, (False, False))[1],
+            )
+            for person in persons
+        ],
         "pagination": {
             "totalItems": total_items,
             "itemsPerPage": limit_per_page,

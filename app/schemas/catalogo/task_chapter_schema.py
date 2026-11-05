@@ -9,14 +9,18 @@ from app.schemas.base import BaseCreateSchema, BaseResponseSchema, BaseUpdateSch
 
 class TaskChapterCreate(BaseCreateSchema):
     name: str = Field(..., min_length=1, max_length=150)
-    stage_id: int = Field(..., description="Etapa de la obra a la que pertenece")
+    stage_id: Optional[int] = None
     description: Optional[str] = None
     display_order: int = 0
     weight_percent: Optional[Decimal] = Field(
         None,
         ge=0,
         le=100,
-        description="% de cumplimiento: cuánto aporta este capítulo al 100% de su etapa",
+        description="% de cumplimiento: cuánto aporta este capítulo al avance de la obra",
+    )
+    is_global: int = Field(
+        0,
+        description="1 si el capítulo se hace una vez y su avance vale para todas las zonas",
     )
 
 
@@ -26,6 +30,7 @@ class TaskChapterUpdate(BaseUpdateSchema):
     description: Optional[str] = None
     display_order: Optional[int] = None
     weight_percent: Optional[Decimal] = Field(None, ge=0, le=100)
+    is_global: Optional[int] = None
     is_active: Optional[int] = None
 
 
@@ -36,5 +41,6 @@ class TaskChapterResponse(BaseResponseSchema):
     description: Optional[str] = None
     display_order: int
     weight_percent: Optional[Decimal] = None
+    is_global: int = 0
     is_active: int
     created_at: Optional[datetime] = None

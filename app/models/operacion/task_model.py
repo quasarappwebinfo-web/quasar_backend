@@ -53,6 +53,23 @@ class Task(Base):
     weight_percent = Column(Numeric(6, 2), nullable=True)
     # Peso de la actividad hacia su actividad presupuestal (copiado de plantilla)
     budget_weight_percent = Column(Numeric(6, 2), nullable=True)
+    chapter_id = Column(
+        Integer,
+        ForeignKey("task_chapters.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
+    )
+    budget_activity_id = Column(
+        Integer,
+        ForeignKey(
+            "task_budget_activities.id", ondelete="NO ACTION", onupdate="NO ACTION"
+        ),
+        nullable=True,
+    )
+    zone_id = Column(
+        Integer,
+        ForeignKey("task_zones.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
+    )
     created_by = Column(
         Integer,
         ForeignKey("users.id", ondelete="NO ACTION", onupdate="NO ACTION"),
@@ -71,6 +88,9 @@ class Task(Base):
     source_template_version = relationship("TaskTemplateVersion", back_populates="tasks")
     parent = relationship("Task", remote_side=[id], backref="subtasks")
     unit = relationship("MeasurementUnit", back_populates="tasks")
+    chapter = relationship("TaskChapter")
+    budget_activity = relationship("TaskBudgetActivity")
+    zone = relationship("TaskZone")
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
     assignments = relationship("TaskAssignment", back_populates="task")

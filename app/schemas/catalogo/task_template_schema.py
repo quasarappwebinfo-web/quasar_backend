@@ -12,7 +12,6 @@ class TaskTemplateCreate(BaseCreateSchema):
     zone_id: Optional[int] = None
     budget_activity_id: int
     name: str = Field(..., min_length=1, max_length=255)
-    code: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
 
 

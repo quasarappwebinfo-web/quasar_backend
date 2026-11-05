@@ -11,7 +11,6 @@ OBRA_CLIENT_ROLES = ("comprador", "propietario", "contacto")
 
 class ObraCreate(BaseCreateSchema):
     name: str = Field(..., min_length=1, max_length=255)
-    code: Optional[str] = Field(None, max_length=100)
     sale_type_id: int
     address: Optional[str] = Field(None, max_length=255)
     city: Optional[str] = Field(None, max_length=150)
@@ -24,7 +23,6 @@ class ObraCreate(BaseCreateSchema):
 
 class ObraUpdate(BaseUpdateSchema):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    code: Optional[str] = Field(None, max_length=100)
     sale_type_id: Optional[int] = None
     address: Optional[str] = Field(None, max_length=255)
     city: Optional[str] = Field(None, max_length=150)

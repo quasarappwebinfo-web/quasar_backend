@@ -60,7 +60,7 @@ class TaskCreateFromTemplate(BaseCreateSchema):
 
 
 class TaskAddToPeriod(BaseCreateSchema):
-    """Agrega una actividad al periodo vigente y pide de nuevo la firma."""
+    """Agrega una actividad al periodo vigente."""
 
     obra_id: int
     template_id: Optional[int] = Field(
@@ -73,6 +73,9 @@ class TaskAddToPeriod(BaseCreateSchema):
         description="Obligatorio si no hay templateId. Actividad única de la obra.",
     )
     description: Optional[str] = None
+    chapter_id: Optional[int] = None
+    budget_activity_id: Optional[int] = None
+    zone_id: Optional[int] = None
     justification: str = Field(..., min_length=8, max_length=2000)
 
 
@@ -84,6 +87,9 @@ class TaskCreateManual(BaseCreateSchema):
     parent_task_id: Optional[int] = None
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    chapter_id: Optional[int] = None
+    budget_activity_id: Optional[int] = None
+    zone_id: Optional[int] = None
     unit_id: Optional[int] = None
     planned_quantity: Optional[Decimal] = None
     estimated_duration_days: Optional[Decimal] = None
@@ -225,11 +231,32 @@ class TaskStatusChangeResult(BaseSchema):
     forced: bool = False
 
 
+class ActivityShare(BaseSchema):
+    task_id: int
+    task_name: str
+    share_percent: Decimal
+    progress_percent: Decimal
+
+
 class BudgetActivityFulfillment(BaseSchema):
     budget_activity_id: Optional[int] = None
     budget_activity_name: Optional[str] = None
     weight_percent: Optional[Decimal] = None
     progress_percent: Decimal
+    activities: List[ActivityShare] = Field(default_factory=list)
+
+
+class ZoneChapterProgress(BaseSchema):
+    chapter_id: int
+    chapter_name: str
+    progress_percent: Decimal
+    is_global: int = 0
+
+
+class ZoneFulfillment(BaseSchema):
+    zone_id: int
+    zone_name: str
+    chapters: List[ZoneChapterProgress] = Field(default_factory=list)
 
 
 class ChapterFulfillment(BaseSchema):
@@ -259,6 +286,7 @@ class ObraFulfillmentResponse(BaseSchema):
     obra_id: int
     progress_percent: Decimal
     chapters: List[ChapterFulfillment]
+    zones: List[ZoneFulfillment] = Field(default_factory=list)
     period: Optional[PeriodFulfillment] = None
     activity_status: ActivityStatusSummary = Field(
         default_factory=ActivityStatusSummary
