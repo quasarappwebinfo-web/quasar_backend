@@ -807,7 +807,7 @@ async def add_activity_to_period(
             or data.zone_id is None
         ):
             raise WorkPlanValidationError(
-                "Indica capítulo, actividad presupuestal y zona."
+                "Indica capítulo, subcapítulo y zona."
             )
         task = add_unique_obra_task(
             db,
