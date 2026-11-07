@@ -9,7 +9,7 @@ from app.schemas.base import BaseCreateSchema, BaseResponseSchema, BaseUpdateSch
 class DocumentCreate(BaseCreateSchema):
     uuid: Optional[str] = Field(None, max_length=36)
     obra_id: int
-    document_type_id: int
+    document_type_id: Optional[int] = None
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     file_url: str = Field(..., max_length=500)
@@ -20,7 +20,7 @@ class DocumentAdd(BaseCreateSchema):
     """Body para POST /obras/{id}/documentos (obraId viene de la URL)."""
 
     uuid: Optional[str] = Field(None, max_length=36)
-    document_type_id: int
+    document_type_id: Optional[int] = None
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     file_url: str = Field(..., max_length=500)
@@ -37,7 +37,7 @@ class DocumentUpdate(BaseUpdateSchema):
 class DocumentResponse(BaseResponseSchema):
     uuid: str
     obra_id: int
-    document_type_id: int
+    document_type_id: Optional[int] = None
     document_type_name: Optional[str] = None
     name: str
     description: Optional[str] = None

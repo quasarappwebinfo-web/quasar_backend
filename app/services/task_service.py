@@ -760,11 +760,11 @@ def _bind_placement(
     )
     if not activity:
         raise TaskOpValidationError(
-            f"No existe la actividad presupuestal {budget_activity_id}"
+            f"No existe el subcapítulo {budget_activity_id}"
         )
     if activity.chapter_id != chapter.id:
         raise TaskOpValidationError(
-            "La actividad presupuestal no pertenece al capítulo"
+            "El subcapítulo no pertenece al capítulo"
         )
     zone = db.query(TaskZone).filter(TaskZone.id == zone_id).first()
     if not zone:
@@ -828,7 +828,7 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
                 {
                     "budget_activity_id": activity.id if activity else None,
                     "budget_activity_name": (
-                        activity.name if activity else "Sin actividad presupuestal"
+                        activity.name if activity else "Sin subcapítulo"
                     ),
                     "weight_percent": _percent_share(len(group_tasks), total),
                     "progress_percent": group_progress,
@@ -1463,7 +1463,7 @@ async def create_task_manual(
         or data.zone_id is None
     ):
         raise TaskOpValidationError(
-            "Indica capítulo, actividad presupuestal y zona."
+            "Indica capítulo, subcapítulo y zona."
         )
 
     task = Task(

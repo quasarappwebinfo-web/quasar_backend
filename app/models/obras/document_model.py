@@ -18,7 +18,7 @@ class Document(Base):
     document_type_id = Column(
         Integer,
         ForeignKey("document_types.id", ondelete="NO ACTION", onupdate="NO ACTION"),
-        nullable=False,
+        nullable=True,
     )
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)

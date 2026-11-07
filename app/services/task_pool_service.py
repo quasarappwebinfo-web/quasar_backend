@@ -435,7 +435,7 @@ async def create_budget_activity(
     )
     if exists:
         raise TaskPoolConflictError(
-            f"Ya existe actividad presupuestal '{data.name}' en ese capítulo"
+            f"Ya existe el subcapítulo '{data.name}' en ese capítulo"
         )
     row = TaskBudgetActivity(
         chapter_id=data.chapter_id,
@@ -472,7 +472,7 @@ async def get_budget_activity(db: Session, item_id: int) -> TaskBudgetActivity:
     )
     if not row:
         raise TaskPoolNotFoundError(
-            f"Actividad presupuestal {item_id} no encontrada"
+            f"Subcapítulo {item_id} no encontrado"
         )
     return row
 
@@ -549,7 +549,7 @@ async def update_budget_activity(
         )
         if conflict:
             raise TaskPoolConflictError(
-                f"Ya existe actividad presupuestal '{next_name}' en ese capítulo"
+                f"Ya existe el subcapítulo '{next_name}' en ese capítulo"
             )
     for k, v in payload.items():
         setattr(row, k, v)
@@ -610,13 +610,14 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         .first()
     )
     _require_active_catalog(
-        label="actividad presupuestal",
+        label="subcapítulo",
+        masculine=True,
         row=activity,
         item_id=data.budget_activity_id,
     )
     if activity.chapter_id != data.chapter_id:
         raise TaskPoolValidationError(
-            "La actividad presupuestal no pertenece al capítulo seleccionado"
+            "El subcapítulo no pertenece al capítulo seleccionado"
         )
     code = f"ACT-{uuid.uuid4().hex[:12].upper()}"
     row = TaskTemplate(
@@ -738,7 +739,7 @@ async def update_template(
         )
         if not activity:
             raise TaskPoolValidationError(
-                f"No existe actividad presupuestal {payload['budget_activity_id']}"
+                f"No existe el subcapítulo {payload['budget_activity_id']}"
             )
     next_chapter_id = payload.get("chapter_id", row.chapter_id)
     next_activity_id = payload.get("budget_activity_id", row.budget_activity_id)
@@ -750,7 +751,7 @@ async def update_template(
         )
         if activity and activity.chapter_id != next_chapter_id:
             raise TaskPoolValidationError(
-                "La actividad presupuestal no pertenece al capítulo seleccionado"
+                "El subcapítulo no pertenece al capítulo seleccionado"
             )
     for k, v in payload.items():
         setattr(row, k, v)

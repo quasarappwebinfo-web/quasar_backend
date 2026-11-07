@@ -1,7 +1,7 @@
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_OBRAS
@@ -34,6 +34,7 @@ from app.services.obra_client_document_service import (
     close_obra_client,
     create_document,
     document_to_dict,
+    upload_obra_documents,
     get_document,
     list_documents,
     list_obra_clients,
@@ -420,6 +421,59 @@ async def list_obra_documents_endpoint(
         ],
         "pagination": result["pagination"],
     }
+
+
+@router.post(
+    "/{obra_id}/documentos/archivos",
+    summary="Subir archivos de la obra a S3",
+    description="Hasta 10 archivos, de 25 MB cada uno. Las imágenes se comprimen.",
+    tags=["obras-documentos"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_obra_documents_endpoint(
+    obra_id: int,
+    files: List[UploadFile] = File(...),
+    names: List[str] = Form(...),
+    descriptions: List[str] = Form(...),
+    visibles: List[int] = Form(...),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_OBRAS)),
+):
+    if len(files) != len(names):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cada archivo necesita su nombre",
+        )
+    if len(descriptions) != len(files) or len(visibles) != len(files):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cada archivo necesita nombre, descripción y visibilidad",
+        )
+    items = []
+    for index, upload in enumerate(files):
+        items.append(
+            (
+                await upload.read(),
+                upload.filename or "archivo",
+                upload.content_type,
+                names[index],
+                descriptions[index] if index < len(descriptions) else "",
+                visibles[index] if index < len(visibles) else 0,
+            )
+        )
+    try:
+        rows = await upload_obra_documents(
+            db, obra_id=obra_id, items=items, uploaded_by=user_auth.id
+        )
+        return {
+            "documents": [
+                DocumentResponse(**row).model_dump(by_alias=True) for row in rows
+            ]
+        }
+    except DocumentConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except DocumentValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(
