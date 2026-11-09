@@ -10,7 +10,7 @@ Carpetas espejo en `app/models/` y `app/schemas/`:
 | `obras/` | obras, etapas, clientes, documentos |
 | `catalogo/` | Task Pool (plantillas versionadas) |
 | `operacion/` | tareas de obra, evidencias, retrasos, reprogramaciones |
-| `planificacion/` | work plans, firmas, snapshots |
+| `planificacion/` | work plans, snapshots. Las tablas de firmas siguen, pero la app no las usa |
 | `auditoria/` | audit_log |
 
 ## Ajustes respecto al DBML original

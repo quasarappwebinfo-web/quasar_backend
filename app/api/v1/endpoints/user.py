@@ -199,10 +199,10 @@ async def update_status_user_endpoint(
 
 @router.put(
     "/users/{user_id}/password",
-    summary="Cambiar contraseña (admin)",
+    summary="Cambiar contraseña de otro usuario",
     description=(
-        "Admin/super puede cambiar contraseña de operativos. "
-        "Solo super admin cambia la de un admin. Super admin: no."
+        "Solo un super admin. No pide la clave actual y no aplica a otro super admin. "
+        "Cierra las sesiones de ese usuario."
     ),
 )
 async def change_password_admin_endpoint(
@@ -227,7 +227,10 @@ async def change_password_admin_endpoint(
 @router.put(
     "/me/password",
     summary="Cambiar mi contraseña",
-    description="El usuario autenticado cambia su propia contraseña (exige currentPassword).",
+    description=(
+        "El usuario autenticado cambia su propia contraseña (exige currentPassword). "
+        "Cierra sus sesiones: hay que volver a iniciar sesión."
+    ),
 )
 async def change_own_password_endpoint(
     body: ChangePasswordRequest,

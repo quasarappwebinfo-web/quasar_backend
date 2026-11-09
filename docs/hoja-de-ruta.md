@@ -2,6 +2,8 @@
 
 Guía práctica de **qué construir y en qué orden** en Quasar Backend (y qué implica el front/offline).
 
+La lista de abajo es el historial de construcción. Lo que la app hace hoy está en las guías de frontend, sobre todo [obras-frontend.md](./obras-frontend.md), [task-pool-frontend.md](./task-pool-frontend.md), [tareas-frontend.md](./tareas-frontend.md) y [planificacion-frontend.md](./planificacion-frontend.md). En corto: no hay pantalla de configuración global, el progreso de la obra es por capítulos y zonas, los documentos de la obra van a S3, y las firmas de planificación no se usan (el acuse de llegada sí).
+
 Ya tienes: base Docker/MySQL, auth JWT + refresh cookie, modelos/schemas por dominio, script del primer admin.
 
 Reglas al implementar cada módulo:
@@ -18,7 +20,7 @@ Documentos relacionados: [`system-core.md`](system-core.md) · [`auth-frontend.m
 ## Cómo usar esta lista
 
 - Cada paso = un “paquete” entregable (CRUD o flujo).
-- No saltes dominios: **obras** necesita personas; **tareas** necesitan obras + catálogo; **firmas** necesitan planificaciones; **sync offline** al final del núcleo de campo.
+- No saltes dominios: **obras** necesita personas; **tareas** necesitan obras + catálogo; **sync offline** al final del núcleo de campo. Las firmas de planificación ya no se construyen.
 - En cada CRUD mínimo: crear, listar (paginado/filtros), obtener por id, actualizar, activar/desactivar (si aplica).
 
 ---
@@ -232,7 +234,9 @@ Aquí nace el día a día en campo (luego offline).
 
 ---
 
-## Fase 7 — Planificación y firmas
+## Fase 7 — Planificación
+
+Las firmas de esta fase quedaron en la base, pero la app ya no las pide. Un plan se edita aunque su estado guardado sea `signed` o `pending_signature`, y en pantalla todos se ven como Borrador. Ver [planificacion-frontend.md](./planificacion-frontend.md).
 
 **Docs frontend:** [planificacion-frontend.md](./planificacion-frontend.md)
 

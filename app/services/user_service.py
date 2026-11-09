@@ -13,6 +13,7 @@ from app.core.permissions import (
     validate_permission_codes,
 )
 from app.core.security import hash_password, verify_password
+from app.services.auth_service import revoke_all_user_refresh_tokens
 from app.models import Person, User, UserPermission, UserRole
 from app.schemas import ChangePasswordRequest, UserCreate, UserStatusUpdate, UserUpdate
 
@@ -360,8 +361,8 @@ async def change_password(
     """
     Cambia la contraseña de user_id.
     - Propio usuario: exige current_password.
-    - Admin/super sobre otro: no exige current; no puede tocar super admin;
-      solo super puede tocar admin.
+    - Sobre otro usuario: solo un super admin, sin la clave actual.
+      No puede cambiar la de otro super admin.
     """
     user = _load_user(db, user_id)
     if not user:
@@ -370,16 +371,14 @@ async def change_password(
     is_self = actor.id == user_id
 
     if not is_self:
+        if not is_super_user(actor):
+            raise UserPermissionError(
+                "Solo un super admin puede cambiar la contraseña de otro usuario"
+            )
         if is_super_user(user):
             raise MasterUserProtectedError(
                 "No se puede cambiar la contraseña del super admin"
             )
-        if is_admin_user(user) and not is_super_user(actor):
-            raise UserPermissionError(
-                "Solo el super admin puede cambiar la contraseña de un admin"
-            )
-        if not has_full_access(actor):
-            raise PermissionError("No tienes permisos para cambiar esta contraseña")
 
     if require_current or is_self:
         if not data.current_password:
@@ -390,6 +389,7 @@ async def change_password(
     user.password = hash_password(data.new_password)
     try:
         db.commit()
+        revoke_all_user_refresh_tokens(db, user.id)
         return _load_user(db, user.id)
     except Exception:
         db.rollback()

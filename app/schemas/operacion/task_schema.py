@@ -234,6 +234,7 @@ class TaskStatusChangeResult(BaseSchema):
 class ActivityShare(BaseSchema):
     task_id: int
     task_name: str
+    status: str = "scheduled"
     share_percent: Decimal
     progress_percent: Decimal
 
@@ -280,6 +281,15 @@ class PeriodFulfillment(BaseSchema):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     progress_percent: Decimal
+
+
+class TaskRemovalResponse(BaseSchema):
+    id: int
+    task_name: str
+    detail: str = ""
+    removed_by: int
+    removed_by_name: Optional[str] = None
+    removed_at: datetime
 
 
 class ObraFulfillmentResponse(BaseSchema):

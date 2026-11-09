@@ -1,14 +1,15 @@
-# Guía del frontend Quasar: Planificación y firmas (Fase 7)
+# Guía del frontend Quasar: Bitácoras y planes (Fase 7)
 
-Compromiso operativo: **qué se va a hacer** en una obra y periodo, con snapshot histórico y firmas.
+Compromiso operativo: **qué se va a hacer** en una obra y periodo, con snapshot del periodo.
+
+En el menú esta zona se llama **Bitácoras obras**. La app **no pide firmas** de planificación. Las tablas `work_plan_signers` y los eventos viejos siguen en la base, pero las rutas de solicitar, firmar, rechazar y firmantes ya no están en el API. El acuse de llegada del día es otra cosa: vive en asistencia.
 
 Complementa:
 - [tareas-frontend.md](./tareas-frontend.md) — tareas que entran al plan
 - [obras-frontend.md](./obras-frontend.md) — obra
-- [identidad-frontend.md](./identidad-frontend.md) — usuarios firmantes
-- [system-core.md](./system-core.md) — §§20–30
+- [identidad-frontend.md](./identidad-frontend.md) — usuarios
 
-**Auth:** Bearer + rol **`admin`**. JSON **camelCase**.
+**Auth:** Bearer + permiso **`planificacion`**. JSON **camelCase**.
 
 ---
 
@@ -17,40 +18,22 @@ Complementa:
 | Idea | Detalle |
 |------|---------|
 | Work plan | Periodo + lista de tareas de una obra |
-| Versión | Snapshot congelable; firmas van a **una versión** |
-| Firmada | **Inmutable**; cambio = nueva versión |
-| Firma | Aprueba esa versión (no “la obra” en abstracto) |
-| `signatureData` | Nota/referencia — **nunca** password ni token |
+| Versión | Snapshot de las tareas de ese periodo |
+| Estado en pantalla | Siempre **Borrador**. `draft`, `pending_signature`, `signed` y `rejected` se etiquetan igual |
+| Edición | El plan se puede editar sin importar el estado guardado |
 
-Estados del plan:
+El historial de la app muestra creación y edición. No muestra firmas.
 
-| Status | UI |
-|--------|-----|
-| `draft` | Editable: tareas, firmantes, fechas |
-| `pending_signature` | Esperando firmas; no editar (cancelar → draft) |
-| `signed` | Todos firmaron; inmutable |
-| `rejected` | Algún firmante rechazó; nueva versión para iterar |
-
-Firmantes: `pending` → `signed` | `rejected`.
-
-Eventos: `created` · `edited` · `requested` · `viewed` · `signed` · `rejected` · `cancelled`.
-
-El historial registra creación del plan/versión, ediciones (cabecera, tareas, firmantes) y cada firma/rechazo.
+Agregar una actividad al periodo vigente (`POST /api/v1/operacion/tareas/agregar-al-periodo`) **no** cambia el plan a `pending_signature` y **no** avisa a los administradores. Pide una justificación de al menos 8 caracteres y, si la actividad es única, capítulo, subcapítulo y zona.
 
 ---
 
-## Flujo feliz
+## Flujo de la app
 
 ```
-Crear plan (obra + fechas + taskIds)
-  → v1 draft + snapshots
-Agregar firmantes
-Solicitar firma → pending_signature + evento requested
-(Firmantes) vista → viewed
-(Firmantes) firmar / rechazar
-  → si todos firman: signed + version.signedAt
-  → si uno rechaza: rejected
-Cambios → POST nueva-version → draft v2
+Crear plan (obra + fechas + actividades)
+  → v1 + snapshots
+Editar cabecera, agregar o quitar actividades
 Comparar snapshot vs tarea actual vs delays
 ```
 
@@ -66,18 +49,12 @@ Base: `/api/v1/planificacion/planes`
 | Pendientes | `GET` | `/pendientes?obraId` → actividades de periodos anteriores sin completar |
 | Crear | `POST` | `/` → `201` |
 | Detalle | `GET` | `/{id}` |
-| Editar cabecera | `PUT` | `/{id}` (solo draft) |
+| Editar cabecera | `PUT` | `/{id}` |
 | Comparar | `GET` | `/{id}/comparar?versionId=` |
-| Solicitar firma | `POST` | `/{id}/solicitar-firma` |
-| Cancelar solicitud | `POST` | `/{id}/cancelar-firma` |
-| Registrar vista | `POST` | `/{id}/vista` |
-| Firmar | `POST` | `/{id}/firmar` |
-| Rechazar | `POST` | `/{id}/rechazar` |
+| Registrar vista | `POST` | `/{id}/vista` — compatibilidad; ya no escribe historial |
 | Nueva versión | `POST` | `/{id}/nueva-version` → `201` |
 | + Tarea snapshot | `POST` | `/versiones/{versionId}/tareas` |
 | − Snapshot | `DELETE` | `/snapshots/{id}` → `204` |
-| + Firmante | `POST` | `/versiones/{versionId}/firmantes` |
-| − Firmante | `DELETE` | `/firmantes/{id}` → `204` |
 
 ---
 
@@ -131,87 +108,9 @@ Crea:
 
 ## 7.2 Firmas
 
-### Firmantes
+No hay firmantes, solicitud, firma ni rechazo en la app. No reconstruir esas pantallas. El acuse de llegada está en [asistencia-frontend.md](./asistencia-frontend.md).
 
-```json
-{ "userId": 3, "signatureOrder": 1 }
-```
-
-`POST /versiones/{versionId}/firmantes` (draft).
-
-### Solicitar
-
-`POST /{planId}/solicitar-firma`
-
-- Exige ≥1 tarea y ≥1 firmante
-- `draft|rejected` → `pending_signature`
-- Evento `requested` (`requestedBy` = usuario actual)
-
-Si desde el tablero de la obra se agrega una actividad (`POST /api/v1/operacion/tareas/agregar-al-periodo`), el plan del periodo vigente vuelve a `pending_signature` aunque ya estuviera firmado: la versión firmada no se modifica y, si hacía falta, se abre otra versión. El evento `requested` guarda el texto «Se añadió «nombre». Justificación: …» y cada administrador recibe un aviso en `GET /api/v1/user/notificaciones`.
-
-### Vista
-
-`POST /{planId}/vista` → evento `viewed` (firmante o solicitante).
-
-### Firmar
-
-`POST /{planId}/firmar` — el usuario autenticado debe ser firmante `pending`.
-
-```json
-{
-  "signatureType": "acknowledgment",
-  "signatureData": "Aprobado en reunión de obra 2026-09-01"
-}
-```
-
-`signatureType`: `acknowledgment` | `electronic`.
-
-El backend:
-- Rechaza `signatureData` con password/token/secret…
-- Guarda IP y User-Agent
-- Evento `signed`
-- Si **todos** firmaron → plan `signed` + `version.signedAt`
-
-Respuesta:
-
-```json
-{
-  "workPlan": { "status": "signed", ... },
-  "signer": { "status": "signed", ... },
-  "fullySigned": true
-}
-```
-
-### Rechazar
-
-```json
-{ "reason": "Falta cuadrilla de electricistas esa semana" }
-```
-
-→ firmante `rejected`, plan `rejected`, evento `rejected`.
-
-### Cancelar solicitud
-
-`POST /{planId}/cancelar-firma` → `pending_signature` → `draft` + evento `cancelled`.
-
-### Nueva versión (post signed/rejected)
-
-`POST /{planId}/nueva-version`
-
-```json
-{
-  "taskIds": null,
-  "name": null,
-  "startDate": null,
-  "endDate": null
-}
-```
-
-- `taskIds: null` → re-snapshot de las mismas tareas (datos **actuales** de la tarea)
-- Plan vuelve a `draft` con `versionNumber` + 1
-- Firmantes **no** se copian (hay que volver a definirlos)
-
-**Regla UI:** si `status === 'signed'` o `version.isImmutable`, todo el snapshot es solo lectura; CTA = “Nueva versión”.
+`POST /{planId}/nueva-version` sigue disponible para planes cuyo estado guardado sea `signed` o `rejected`. La interfaz no lo usa como paso obligatorio: un plan se edita en su versión actual.
 
 ---
 
@@ -228,7 +127,7 @@ Por cada ítem del snapshot:
 | Real / pérdidas | `daysLostTotal`, `delayCount` |
 | Diff | `varianceNote` (texto corto) |
 
-Ideal para tabla “Lo firmado vs lo que pasó”.
+Ideal para tabla “Lo planeado vs lo que pasó”.
 
 ---
 
@@ -251,23 +150,20 @@ Ideal para tabla “Lo firmado vs lo que pasó”.
 
 ## Pantallas sugeridas
 
-| Ruta | Contenido |
+| Ruta en la app | Contenido |
 |------|-----------|
-| `/obras/:obraId/planes` | Listado por obra + status |
-| `/planes/:id` | Detalle versión actual, timeline de eventos, CTA firmar |
-| `/planes/:id/comparar` | Tabla planificado / actual / delays |
+| Bitácoras obras | Listado de planes. El estado se muestra como Borrador |
+| Detalle del plan | Periodo, actividades y historial de creación/edición |
+| Comparar | Tabla planificado / actual / delays |
 
 ---
 
 ## Checklist QA
 
-- [ ] Crear plan con 2–3 tareas → ver snapshots  
-- [ ] Solicitar firma sin firmantes → 400  
-- [ ] Firmar con usuario no firmante → 400  
-- [ ] `signatureData` con `"password":"..."` → 400  
-- [ ] Todos firman → `signed` + inmutable  
-- [ ] Intentar agregar tarea a signed → 400  
-- [ ] Nueva versión → draft vN + comparar muestra diffs  
+- [ ] Crear plan con 2–3 tareas → ver snapshots
+- [ ] Editar un plan cuyo estado guardado no sea `draft` → la app lo permite
+- [ ] Agregar actividad al periodo con justificación corta → 400
+- [ ] Comparar muestra diffs de fechas y retrasos  
 
 ---
 

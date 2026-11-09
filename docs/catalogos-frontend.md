@@ -1,6 +1,8 @@
 # Guía del frontend Quasar: Catálogos (Fase 2)
 
-CRUD admin de maestros pequeños: cargos, especialidades, motivos de retraso, unidades, tipos de documento/venta y etapas de obra.
+CRUD admin de maestros pequeños: cargos, especialidades, motivos de retraso y unidades.
+
+Tipos de venta, tipos de documento y etapas de obra **siguen en el API**, pero la app ya no tiene pantalla para administrarlos. `/dashboard/maestros/*` redirige a Inicio. El formulario de obra todavía puede leer tipos de venta. Los documentos de la obra ya no piden tipo.
 
 Complementa [auth-frontend.md](./auth-frontend.md) e [identidad-frontend.md](./identidad-frontend.md).
 
@@ -173,6 +175,8 @@ Para Task Pool y tareas (m², m³, und, …).
 
 ## 2.5 Tipos de documento / venta / etapas
 
+Estos tres catálogos **no tienen pantalla** en la app. El API de lectura sigue para no romper filas viejas. No construir de nuevo «Configuración global».
+
 ### Tipos de documento — `/api/v1/obras/tipos-documento`
 
 ```json
@@ -218,15 +222,15 @@ Respuesta:
 }
 ```
 
-**UI:** lista ordenada por `displayOrder`; al crear/editar, campo numérico de orden (sugerencia: 10, 20, 30… para insertar entre medias).
+El stepper de etapas de la obra, si todavía aparece en el formulario, ordena por `displayOrder`. El **Progreso de la construcción** de la ficha no usa estas etapas: usa capítulos y zonas.
 
 ---
 
-## Flujos de pantalla sugeridos
+## Flujos de pantalla
 
-1. **Admin → Catálogos RRHH:** Cargos y Especialidades (especialidad depende de cargo).
-2. **Admin → Catálogos obra:** Tipos de venta, Etapas, Tipos de documento.
-3. **Admin → Operación / Catálogo:** Motivos de retraso + Unidades de medida.
+1. **RRHH:** Cargos y especialidades (la especialidad depende del cargo).
+2. **Listado General Act.:** unidades de medida, junto con capítulos, subcapítulos, zonas y actividades registradas.
+3. Motivos de retraso siguen en el API para los retrasos de una actividad.
 
 En formularios de negocio (trabajador, obra, tarea):
 
@@ -241,10 +245,8 @@ En formularios de negocio (trabajador, obra, tarea):
 - [ ] CRUD especialidades (filtro `workerPositionId` + validación de cargo)
 - [ ] CRUD motivos de retraso
 - [ ] CRUD unidades de medida (mostrar símbolo)
-- [ ] CRUD tipos de documento
-- [ ] CRUD tipos de venta
-- [ ] CRUD etapas (`displayOrder` en listado)
 - [ ] Selects de formularios con `activeOnly=true`
+- [ ] No hay pantalla de tipos de documento, tipos de venta ni etapas
 - [ ] Manejo de `409` en nombres duplicados
 
 RRHH operativo (trabajadores, obras, cuadrillas): [rrhh-frontend.md](./rrhh-frontend.md).

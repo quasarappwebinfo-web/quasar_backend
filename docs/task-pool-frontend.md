@@ -1,6 +1,6 @@
-# Guía del frontend Quasar: Task Pool (Fase 5)
+# Guía del frontend Quasar: Listado General de Actividades (Fase 5)
 
-Biblioteca reutilizable de conocimiento constructivo. **No son tareas de obra.**
+Biblioteca reutilizable de conocimiento constructivo. **No son tareas de obra.** En el menú se llama **Listado General Act.** Las pestañas son Actividades registradas, Capítulos, Subcapítulos, Zonas y Unidades. No hay pestaña de etapas: el catálogo arranca en el capítulo.
 
 Complementa:
 - [catalogos-frontend.md](./catalogos-frontend.md) — unidades de medida, cargos (`worker_positions`)
@@ -17,18 +17,20 @@ Paginación: 15 ítems/página (mismo shape que el resto del API).
 | Qué es | Qué no es |
 |--------|-----------|
 | Catálogo de plantillas versionadas | Tareas asignadas a una obra (eso es Fase 6) |
-| Identidad de la actividad (capítulo, actividad presupuestal, nombre, código). Cantidad, tiempo, subtareas y cuadrillas son opcionales | Aprobación del supervisor |
+| Identidad de la actividad (capítulo, subcapítulo y nombre). Cantidad, tiempo, subtareas y cuadrillas son opcionales. Código y orden no se piden | Aprobación del supervisor |
 | El sistema **recomienda** | Nadie auto-aprueba aquí |
 
 Flujo mental:
 
 ```
-Capítulo → Plantilla (code único) → Versión draft
-    → editar detalle (unidades, cargos, subtareas, deps)
-    → Publicar (inmutable)
-    → Recomendar(obraQuantity) → valores sugeridos
-    → (Fase 6) crear tarea en obra y el supervisor aprueba
+Capítulo (% de la casa) → Subcapítulo → Actividad registrada
+    → al crear una obra, las marcadas Fija se copian
+    → en esa obra, las actividades del capítulo se reparten el % del capítulo en partes iguales
 ```
+
+El `%` que manda es el del **capítulo sobre la obra**. El subcapítulo no tiene un `%` propio en el listado. `budgetWeightPercent` de la plantilla se sigue calculando, pero la interfaz no lo muestra como peso de la casa. Al agregar actividades a una obra, el reparto de ese capítulo se vuelve a equilibrar entre las actividades que están en la obra, no entre las del catálogo.
+
+`isGlobal: 1` en el capítulo significa «En todas las zonas»: el avance es el mismo en cada zona. `0` es «Por zona».
 
 Cambios a una versión **published**: no se edita. Se crea una **nueva versión** (opcionalmente clonando con `copyFromVersionId`).
 
@@ -66,19 +68,19 @@ Transiciones:
 
 ---
 
-## Mapa de pantallas sugerido
+## Mapa de pantallas
 
-| Ruta frontend | Pantalla | Contenido |
-|---------------|----------|-----------|
-| `/maestros/task-pool/etapas` | Etapas | El catálogo de etapas de obra. Obligatorio: nombre y orden. Opcional: descripción y `%` de la obra |
-| `/maestros/task-pool/capitulos` | Capítulos | CRUD. Obligatorio: nombre y etapa. Opcional: descripción, orden, `%` de la etapa |
-| `/maestros/task-pool/actividades-presupuestales` | Actividades presupuestales | CRUD. Obligatorio: capítulo y nombre. Opcional: zona, descripción, orden, `%` del capítulo |
-| `/maestros/task-pool/plantillas` | Listado plantillas | Filtro capítulo, búsqueda, activo |
-| `/maestros/task-pool/plantillas/:id` | Detalle plantilla | Meta + listado de versiones |
-| `/maestros/task-pool/versiones/:versionId` | Editor de versión | Cabecera + tabs detalle; botones Publicar / Archivar / Nueva versión |
-| (modal / drawer) | Recomendar | Input cantidad obra → duración y cargos sugeridos |
+La ruta sigue siendo `/dashboard/maestros/task-pool`. Las pestañas internas no piden código ni orden. Los selects de capítulo, subcapítulo y zona recorren todas las páginas (el API devuelve 15 por página). El select de subcapítulo solo lista los del capítulo elegido.
 
-Carpeta feature sugerida: `src/task-pool/` (APIs, tipos, pantallas maestros).
+| Pestaña | Qué pide la app |
+|---------|-----------------|
+| Capítulos | Nombre, descripción, `% de la obra` y alcance (Por zona / En todas las zonas). La etapa es opcional en el API y no se pide |
+| Subcapítulos | Capítulo y nombre. La ruta del API sigue siendo `/actividades-presupuestales` |
+| Zonas | Nombre y descripción |
+| Actividades registradas | Capítulo, subcapítulo y nombre. El código lo genera el backend (`ACT-` + 12 hex) y no se muestra |
+| Unidades | Nombre y símbolo |
+
+Carpeta feature: `src/task-pool/`.
 
 ---
 
@@ -96,7 +98,7 @@ Base común: `/api/v1/catalogo`
 | | `POST`/`GET`/`PUT` | `/zonas-tarea[/{id}]` | igual que capítulos |
 | Act. presupuestal | `GET` | `/actividades-presupuestales` | → `budgetActivities` |
 | | `POST`/`GET`/`PUT` | `/actividades-presupuestales[/{id}]` | igual que capítulos |
-| Plantillas | `GET` | `/plantillas` | `?page&search&chapterId&zoneId&budgetActivityId&activeOnly` → `templates` |
+| Plantillas | `GET` | `/plantillas` | `?page&search&chapterId&zoneId&budgetActivityId&activeOnly&fixedOnly` → `templates` |
 | | `POST` | `/plantillas` | `201`; `code` único |
 | | `GET` | `/plantillas/{id}` | |
 | | `PUT` | `/plantillas/{id}` | no cambia `code` |
@@ -140,10 +142,11 @@ Base: `/api/v1/catalogo/capitulos-tarea`
 | Campo | Al crear | En el `PUT` | Qué es |
 |-------|----------|-------------|--------|
 | `name` | **Obligatorio** | Opcional | Nombre del capítulo. 1–150 caracteres |
-| `stageId` | **Obligatorio** | Opcional | Etapa de obra (`/api/v1/obras/etapas`) activa. El capítulo pertenece a esa etapa |
+| `stageId` | Opcional | Opcional | Etapa de obra. La app no la pide. Si no se envía, el capítulo queda sin etapa |
 | `description` | Opcional | Opcional | Texto libre |
-| `displayOrder` | Opcional, default `0` | Opcional | Orden en listados |
-| `weightPercent` | Opcional | Opcional | `%` del capítulo dentro del 100% de su etapa. El `%` de la etapa es el que aporta a la obra. `0`–`100` |
+| `displayOrder` | Opcional, default `0` | Opcional | La app no lo pide. El listado ordena por nombre |
+| `weightPercent` | Opcional | Opcional | `%` de este capítulo sobre la casa, `0`–`100`. Es el único peso que usa el avance global |
+| `isGlobal` | Opcional, default `0` | Opcional | `1` = el avance vale igual en todas las zonas. `0` = se mide por zona |
 | `isActive` | No se envía (el backend guarda `1`) | Opcional | `1` activo, `2` inactivo |
 
 ### Respuesta
@@ -157,6 +160,7 @@ Base: `/api/v1/catalogo/capitulos-tarea`
   "description": "Actividades estructurales",
   "displayOrder": 10,
   "weightPercent": "25.00",
+  "isGlobal": 0,
   "isActive": 1,
   "createdAt": "2026-03-18T12:00:00"
 }
@@ -167,7 +171,9 @@ Orden por defecto: `displayOrder` ASC, luego `name`.
 
 ---
 
-## 5.1b Zonas (`task_zones`) y actividades presupuestales (`task_budget_activities`)
+## 5.1b Zonas (`task_zones`) y subcapítulos (`task_budget_activities`)
+
+En la interfaz, la actividad presupuestal se llama **subcapítulo**. Las rutas y los campos del API no cambiaron de nombre.
 
 ### Zona — `/api/v1/catalogo/zonas-tarea`
 
@@ -180,9 +186,9 @@ Orden por defecto: `displayOrder` ASC, luego `name`.
 | `displayOrder` | Opcional, default `0` | Opcional | Orden |
 | `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
-### Actividad presupuestal — `/api/v1/catalogo/actividades-presupuestales`
+### Subcapítulo — `/api/v1/catalogo/actividades-presupuestales`
 
-Rubro dentro de un capítulo. Ejemplo: capítulo Estructura → actividad Estructura metálica.
+Rubro dentro de un capítulo. Ejemplo: capítulo Estructura → subcapítulo Estructura metálica. Su `%` no se escribe en el listado: en cada obra se reparte solo.
 
 | Campo | Al crear | En el `PUT` | Qué es |
 |-------|----------|-------------|--------|
@@ -191,8 +197,8 @@ Rubro dentro de un capítulo. Ejemplo: capítulo Estructura → actividad Estruc
 | `zoneId` | Opcional | Opcional | Zona. Se puede dejar vacía |
 | `description` | Opcional | Opcional | Texto libre |
 | `displayOrder` | Opcional, default `0` | Opcional | Orden |
-| `chapterWeightPercent` | Opcional | Opcional | `%` de cumplimiento de esta actividad dentro del 100% de su capítulo. `0`–`100` |
-| `zoneWeightPercent` | Opcional | Opcional | `%` que aporta al 100% de su zona. `0`–`100`. No hace falta para el avance global |
+| `chapterWeightPercent` | Opcional | Opcional | Sigue en el API. La app no lo usa como peso de la casa |
+| `zoneWeightPercent` | Opcional | Opcional | Sigue en el API. No entra en el avance global |
 | `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
 Migración: `007_task_zone_budget_activity`.
@@ -214,19 +220,21 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
   "budgetActivityId": 3,
   "name": "Vaciado de losa",
   "code": "EST-LOSA-01",
-  "description": "Vaciado de losa de concreto"
+  "description": "Vaciado de losa de concreto",
+  "isFixed": 1
 }
 ```
 
 | Campo | Al crear | En el `PUT` | Qué es |
 |-------|----------|-------------|--------|
 | `chapterId` | **Obligatorio** | Opcional | Capítulo activo |
-| `budgetActivityId` | **Obligatorio** | Opcional | Actividad presupuestal activa, y del mismo `chapterId` |
+| `budgetActivityId` | **Obligatorio** | Opcional | Subcapítulo activo, y del mismo `chapterId` |
 | `name` | **Obligatorio** | Opcional | 1–255 caracteres |
-| `code` | **Obligatorio** | No se puede cambiar | Código único. Si se repite, `409` |
+| `code` | Lo genera el backend | No se puede cambiar | Si no se envía, queda `ACT-` + 12 hex en mayúsculas. La app no lo muestra |
 | `zoneId` | Opcional | Opcional | Zona. La actividad se guarda sin zona |
 | `description` | Opcional | Opcional | Texto libre |
-| `budgetWeightPercent` | No se envía | No se envía | Lo calcula el backend: 100 dividido entre las actividades activas de esa actividad presupuestal. 1 actividad = 100, 2 = 50, 3 = 33.33. Al crear, mover o activar/desactivar una, se recalculan todas las de ese grupo |
+| `isFixed` | Opcional, default `0` | Opcional | `1` fija, `0` no. Si se omite al crear, queda en `0`. Otro valor → `400` |
+| `budgetWeightPercent` | No se envía | No se envía | El backend lo reparte entre las plantillas activas del mismo subcapítulo. No es el peso de la casa y la app no lo muestra |
 | `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
 ### Respuesta
@@ -244,6 +252,7 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
   "code": "EST-LOSA-01",
   "description": "Vaciado de losa de concreto",
   "budgetWeightPercent": "50.00",
+  "isFixed": 1,
   "isActive": 1,
   "createdAt": "2026-03-18T12:00:00"
 }
@@ -258,6 +267,19 @@ Filtros útiles:
 | `chapterId` | Filtrar por capítulo |
 | `activeOnly=true` | Selectors / pickers |
 | `search` | Nombre o código |
+| `fixedOnly=true` | Solo las marcadas como fijas |
+
+### Actividad fija
+
+Check en el alta y en la edición de la actividad. Etiqueta sugerida: **Fija**.
+
+- `isFixed: 1` — al crear una obra, esta actividad se copia sola como actividad de esa obra.
+- `isFixed: 0` — hay que agregarla a mano, como hasta ahora.
+- Solo entran las que además están activas (`isActive: 1`).
+- Es una copia en ese momento. Marcar o desmarcar **Fija** después no agrega ni quita actividades en obras que ya existen.
+- En la obra se pueden quitar las que no apliquen: `DELETE /api/v1/operacion/tareas/{id}`. Ver [tareas-frontend.md](./tareas-frontend.md).
+
+El `POST /api/v1/obras` no recibe una lista de actividades. El frontend, después de crear la obra, carga `GET /api/v1/operacion/tareas?obraId=`.
 
 ---
 
@@ -557,9 +579,9 @@ Ejemplo: base 100 m³ / 5 días / 4 personas; obra 250 m³ → factor `2.5` → 
 
 ## Flujo feliz (checklist QA frontend)
 
-1. Crear capítulo: solo el nombre es obligatorio. `weightPercent` es opcional.
-2. Crear actividad presupuestal: `chapterId` y nombre obligatorios. `chapterWeightPercent` es opcional.
-3. Crear plantilla: `chapterId`, `budgetActivityId`, `name` y `code` obligatorios. Zona opcional. `budgetWeightPercent` lo calcula el backend.
+1. Crear capítulo: el nombre es obligatorio. `weightPercent` es el `%` de la casa. `isGlobal` dice si vale en todas las zonas. La etapa no se pide.
+2. Crear subcapítulo: `chapterId` y nombre. No se le escribe un `%` de la casa.
+3. Crear actividad registrada: `chapterId`, `budgetActivityId` y `name`. El código lo pone el backend y no se muestra.
 4. Crear versión draft (cantidad y duración opcionales).
 5. El detalle (unidades, cargos, subtareas, cuadrillas) es opcional.
 6. **Publicar** la versión.

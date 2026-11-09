@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     s3_use_presigned_urls: bool = True
     s3_presign_expire_seconds: int = 86400  # 24h para cards del front
 
+    # Correo para recuperar el acceso. Vacío = esa vía no está disponible.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    smtp_use_ssl: bool = False
+    password_reset_code_minutes: int = 15
+
     def get_database_url(self) -> str:
         url = self.database_url
         if "${MYSQL_ROOT_PASSWORD}" in url:

@@ -48,7 +48,11 @@ from app.schemas import (
     TaskUpdate,
     WorkPlanResponse,
 )
-from app.schemas.operacion.task_schema import ObraFulfillmentResponse, TaskAddToPeriod
+from app.schemas.operacion.task_schema import (
+    ObraFulfillmentResponse,
+    TaskAddToPeriod,
+    TaskRemovalResponse,
+)
 from app.services import task_service as svc
 from app.services import work_plan_service as plans
 
@@ -165,6 +169,24 @@ async def fulfillment(
         return ObraFulfillmentResponse(**result).model_dump(by_alias=True)
     except svc.TaskOpError as e:
         _err(e)
+
+
+@router.get(
+    "/bajas",
+    summary="Actividades quitadas de una obra, con quién y cuándo",
+)
+async def removed_activities(
+    obra_id: int = Query(..., alias="obraId"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    _ = user_auth
+    rows = await svc.list_removed_activities(db, obra_id)
+    return {
+        "removals": [
+            TaskRemovalResponse(**row).model_dump(by_alias=True) for row in rows
+        ]
+    }
 
 
 @router.get(
@@ -373,6 +395,23 @@ async def get_task_detail(
                 for a in detail["activity"]
             ],
         }
+    except svc.TaskOpError as e:
+        _err(e)
+
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Quitar una actividad que sigue programada y no se ha usado",
+)
+async def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    _ = user_auth
+    try:
+        await svc.delete_task(db, task_id, removed_by=user_auth.id)
     except svc.TaskOpError as e:
         _err(e)
 

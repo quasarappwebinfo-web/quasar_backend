@@ -32,6 +32,21 @@ class LoginResponse(BaseSchema):
     has_full_access: bool = False
     permissions: list[str] = Field(default_factory=list)
 
+class PasswordRecoveryRequest(BaseSchema):
+    identifier: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Usuario o correo",
+    )
+
+
+class PasswordRecoveryConfirm(BaseSchema):
+    identifier: str = Field(..., min_length=1, max_length=255)
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8, max_length=255)
+
+
 class AccessTokenResponse(BaseSchema):
     access_token: str
     token_type: str = "bearer"
