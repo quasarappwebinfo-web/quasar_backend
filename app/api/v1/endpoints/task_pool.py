@@ -304,6 +304,7 @@ async def list_templates(
     zone_id: Optional[int] = Query(None),
     budget_activity_id: Optional[int] = Query(None),
     active_only: bool = Query(False),
+    fixed_only: bool = Query(False, alias="fixedOnly"),
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TASK_POOL)),
 ):
@@ -316,6 +317,7 @@ async def list_templates(
         zone_id=zone_id,
         budget_activity_id=budget_activity_id,
         active_only=active_only,
+        fixed_only=fixed_only,
     )
     return {
         "templates": [

@@ -164,6 +164,20 @@ CORS_ORIGINS=https://app.constructoraquasar.com
 
 `SECRET_KEY` y `MYSQL_ROOT_PASSWORD` distintos en cada entorno. Genera claves con `openssl rand -hex 32`.
 
+Para que un usuario recupere la clave por correo, en el `.env` de cada backend:
+
+```env
+SMTP_HOST=smtp.tuproveedor.com
+SMTP_PORT=587
+SMTP_USERNAME=correo@constructoraquasar.com
+SMTP_PASSWORD=clave-del-buzon
+SMTP_FROM=correo@constructoraquasar.com
+SMTP_STARTTLS=true
+SMTP_USE_SSL=false
+```
+
+Si `SMTP_HOST` queda vacío, esa pantalla responde que la recuperación no está disponible y el restablecimiento lo hace un super admin.
+
 En los dos `docker-compose` (staging y prod), publica los puertos solo en localhost. API:
 
 ```yaml

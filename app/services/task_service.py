@@ -16,6 +16,7 @@ from app.models import (
     Crew,
     DelayReason,
     MeasurementUnit,
+    AuditLog,
     Obra,
     Task,
     TaskAssignment,
@@ -608,12 +609,7 @@ async def list_tasks(
             | (Task.planned_start_date <= date_to)
         )
     if chapter_id is not None:
-        q = (
-            q.join(Task.source_template_version)
-            .join(TaskTemplateVersion.task_template)
-            .filter(TaskTemplate.chapter_id == chapter_id)
-            .distinct()
-        )
+        q = q.filter(Task.chapter_id == chapter_id)
 
     total = q.count()
     rows = (
@@ -836,6 +832,7 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
                         {
                             "task_id": task.id,
                             "task_name": task.name,
+                            "status": task.status,
                             "share_percent": each_share,
                             "progress_percent": _task_progress_percent(task),
                         }
@@ -1106,6 +1103,44 @@ def _estimate_duration(
         Decimal("0.0001"), rounding=ROUND_HALF_UP
     )
     return (base_days * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def copy_fixed_activities_to_obra(
+    db: Session, *, obra_id: int, created_by: int
+) -> None:
+    """Copia las actividades fijas y activas del catálogo. No hace commit."""
+    templates = (
+        db.query(TaskTemplate)
+        .filter(TaskTemplate.is_active == 1, TaskTemplate.is_fixed == 1)
+        .order_by(TaskTemplate.name.asc())
+        .all()
+    )
+    for tpl in templates:
+        task = Task(
+            uuid=str(uuid_lib.uuid4()),
+            obra_id=obra_id,
+            source_template_id=tpl.id,
+            source_template_version_id=None,
+            parent_task_id=None,
+            name=tpl.name,
+            description=tpl.description,
+            status=STATUS_SCHEDULED,
+            budget_weight_percent=tpl.budget_weight_percent,
+            chapter_id=tpl.chapter_id,
+            budget_activity_id=tpl.budget_activity_id,
+            zone_id=tpl.zone_id,
+            created_by=created_by,
+        )
+        db.add(task)
+        db.flush()
+        _append_history(
+            db,
+            task_id=task.id,
+            from_status=None,
+            to_status=STATUS_SCHEDULED,
+            changed_by=created_by,
+            reason="Copiada al crear la obra porque la actividad está marcada como fija",
+        )
 
 
 def add_task_from_catalog(
@@ -1502,6 +1537,110 @@ async def create_task_manual(
     )
     db.commit()
     return await get_task(db, task.id)
+
+
+def _task_already_used(db: Session, task_id: int) -> bool:
+    """True si la actividad ya tiene uso distinto del alta inicial."""
+    if db.query(Task.id).filter(Task.parent_task_id == task_id).first():
+        return True
+    usage_models = (
+        TaskAssignment,
+        TaskCrewAssignment,
+        TaskDailyAssignment,
+        TaskComment,
+        TaskPhoto,
+        TaskDocument,
+        TaskDelayEvent,
+        TaskReschedule,
+        TaskDependency,
+        TaskDependencyOverride,
+        WorkPlanTask,
+    )
+    for model in usage_models:
+        if db.query(model.id).filter(model.task_id == task_id).first():
+            return True
+    prerequisite = (
+        db.query(TaskDependency.id)
+        .filter(TaskDependency.depends_on_task_id == task_id)
+        .first()
+    )
+    return prerequisite is not None
+
+
+async def delete_task(db: Session, task_id: int, *, removed_by: int) -> None:
+    """Quita una actividad que sigue programada y todavía no se usó."""
+    row = (
+        db.query(Task)
+        .options(*_task_load_options())
+        .filter(Task.id == task_id)
+        .first()
+    )
+    if not row:
+        raise TaskOpNotFoundError(f"Tarea {task_id} no encontrada")
+    if row.status != STATUS_SCHEDULED:
+        raise TaskOpValidationError(
+            "Solo se puede quitar una actividad que sigue programada."
+        )
+    if _task_already_used(db, task_id):
+        raise TaskOpValidationError(
+            "Esta actividad ya se usó en la obra. Solo se puede quitar si "
+            "sigue programada y todavía no tiene subtareas, asignaciones, "
+            "periodo, dependencias ni evidencia."
+        )
+    chapter, activity, zone = _task_placement(row)
+    db.add(
+        AuditLog(
+            entity_type="obra",
+            entity_id=row.obra_id,
+            action="actividad_quitada",
+            field_changed="actividad",
+            old_value=(row.name or "")[:255],
+            new_value="quitada",
+            reason=(
+                f"«{row.name}». "
+                f"Capítulo: {chapter.name if chapter else 'Sin capítulo'}. "
+                f"Subcapítulo: {activity.name if activity else 'Sin subcapítulo'}. "
+                f"Zona: {zone.name if zone else 'Sin zona'}."
+            ),
+            changed_by=removed_by,
+            changed_at=datetime.utcnow(),
+        )
+    )
+    histories = (
+        db.query(TaskStatusHistory)
+        .filter(TaskStatusHistory.task_id == task_id)
+        .all()
+    )
+    for item in histories:
+        db.delete(item)
+    db.delete(row)
+    db.commit()
+
+
+async def list_removed_activities(db: Session, obra_id: int) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(AuditLog)
+        .options(joinedload(AuditLog.changed_by_user).joinedload(User.person))
+        .filter(
+            AuditLog.entity_type == "obra",
+            AuditLog.entity_id == obra_id,
+            AuditLog.action == "actividad_quitada",
+        )
+        .order_by(AuditLog.changed_at.desc(), AuditLog.id.desc())
+        .limit(100)
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "task_name": row.old_value or "Actividad",
+            "detail": row.reason or "",
+            "removed_by": row.changed_by,
+            "removed_by_name": _user_display(row.changed_by_user),
+            "removed_at": row.changed_at,
+        }
+        for row in rows
+    ]
 
 
 async def update_task(

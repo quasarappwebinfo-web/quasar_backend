@@ -75,17 +75,16 @@ Ruta sugerida: `/tareas` o `/obras/:obraId/tareas`.
 
 | Campo de la respuesta | Qué pintar |
 |-----------------------|------------|
-| `progressPercent` | Avance global de la obra, `0`–`100`. Usa el `%` del capítulo y el de la actividad presupuestal |
-| `period` | Plan que cubre hoy (o el más reciente). `progressPercent` es el avance de las actividades de ese periodo, con los mismos `%` |
+| `progressPercent` | **% global obra ejecutada.** Suma, sobre todos los capítulos activos, `weightPercent / 100 × avance del capítulo`. Un capítulo sin actividades o sin `%` aporta 0. No se renormaliza con la suma de los `%` que sí tienen actividades |
+| `period.progressPercent` | **% cumplimiento bitácora actual.** Promedio simple de las actividades de ese periodo. No es un pedazo de la casa |
 | `activityStatus` | Conteos del periodo: `completed` (completadas + verificadas), `inProgress`, `pending` (programadas + reprogramadas). Si no hay periodo, cuenta toda la obra |
+| `zones[]` | Una fila por zona activa. `chapters[]` trae **todos** los capítulos activos con su `progressPercent`. El global (`isGlobal: 1`) promedia sus actividades en todas las zonas; el resto, solo las de esa zona |
 | `chapters[].chapterName` | Nombre del capítulo |
-| `chapters[].weightPercent` | `%` que ese capítulo aporta al global. Puede venir `null` si no se cargó en el pool |
-| `chapters[].progressPercent` | Cómo va ese capítulo |
-| `chapters[].budgetActivities[].budgetActivityName` | Actividad presupuestal |
-| `chapters[].budgetActivities[].weightPercent` | `%` de esa actividad dentro del capítulo. Puede venir `null` |
-| `chapters[].budgetActivities[].progressPercent` | Cómo va esa actividad presupuestal |
+| `chapters[].weightPercent` | `%` de la casa. Puede venir `null` |
+| `chapters[].progressPercent` | Cómo va ese capítulo en la obra |
+| `chapters[].budgetActivities[]` | Subcapítulos. Su `%` dentro del capítulo es la cantidad de actividades de ese grupo sobre el total de actividades del capítulo **en esa obra** |
 
-Si un grupo no tiene pesos cargados, el backend reparte el avance de ese grupo por igual. No pidas esos `%` para poder ver la pantalla.
+Dentro de un subcapítulo, cada actividad vale `1 / cantidad` de ese grupo. Agregar una actividad después reequilibra. El conjunto que cuenta son las actividades de la obra, no las de la bitácora de la semana.
 
 ### Card — contrato visual
 
@@ -185,8 +184,9 @@ Base: `/api/v1/operacion/tareas`
 | Kanban | `GET` | `/tablero?obraId=` |
 | Cumplimiento | `GET` | `/cumplimiento?obraId=` → ver campos abajo |
 | Desde plantilla | `POST` | `/desde-plantilla` → `201` |
-| Al periodo | `POST` | `/agregar-al-periodo` → `201`. Pool sin versión, o actividad solo de la obra. Exige justificación, avisa a los admins y deja el plan del periodo en `pending_signature` |
+| Al periodo | `POST` | `/agregar-al-periodo` → `201`. Del listado, o actividad solo de la obra. Justificación de al menos 8 caracteres. Si es única, pide capítulo, subcapítulo y zona. No cambia el estado del plan ni avisa a los admins |
 | Manual / subtarea | `POST` | `/` → `201` |
+| Quitar | `DELETE` | `/{id}` → `204`. Solo si sigue `scheduled` y no tiene uso |
 | Detalle | `GET` | `/{id}` |
 | Editar cabecera | `PUT` | `/{id}` |
 | Cambiar status | `POST` | `/{id}/estado` |
@@ -206,6 +206,32 @@ Base: `/api/v1/operacion/tareas`
 | Borrar foto | `DELETE` | `/fotos/{id}` → `204` |
 
 Errores: `400` · `404` · `409` (duplicado **o** inicio bloqueado por deps).
+
+---
+
+## Actividades fijas al crear la obra
+
+No hay un body extra en `POST /api/v1/obras`. El backend copia las plantillas con `isFixed: 1` e `isActive: 1` y las deja en esta obra como tareas `scheduled`, ligadas con `sourceTemplateId`, sin versión, sin cantidad y sin fechas. El motivo en el historial es «Copiada al crear la obra porque la actividad está marcada como fija».
+
+En la ficha de la obra no se listan. Tienen su vista en `/dashboard/obras/:obraId/actividades`: un tablero con una columna por capítulo. Arriba hay filtro de capítulo y de subcapítulo; el de subcapítulo solo ofrece los del capítulo elegido. La cabecera muestra el nombre del capítulo y su `%` de ejecución. Cada tarjeta dice si está completada, el `%` de avance, el subcapítulo y la zona.
+
+### Quitar una actividad
+
+`DELETE /api/v1/operacion/tareas/{id}` → `204`
+
+La pantalla abre un modal de confirmación. No es un clic directo. Sirve para las copiadas al crear la obra y para cualquier otra que siga sin uso.
+
+| Respuesta | Cuándo |
+|-----------|--------|
+| `204` | Se quitó. No queda en el tablero |
+| `404` | No existe |
+| `400` | Ya no está `scheduled`, o tiene subtareas, asignaciones, periodo, dependencias o evidencia |
+
+Antes de borrarla, el backend escribe en `audit_log` (`entityType: obra`, `action: actividad_quitada`) el nombre, el capítulo, el subcapítulo, la zona, el usuario y la hora.
+
+`GET /api/v1/operacion/tareas/bajas?obraId=` → `{ removals: [{ id, taskName, detail, removedBy, removedByName, removedAt }] }`
+
+Quitar la actividad de la obra no cambia el catálogo ni las demás obras.
 
 ---
 
@@ -500,4 +526,4 @@ Respuesta: `fileUrl` resuelta (presigned o pública según env).
 |------|--|
 | **5** | Catálogo / recommend |
 | **6** | Esta guía |
-| **7** | [planificacion-frontend.md](./planificacion-frontend.md) — work plans + firmas |
+| **7** | [planificacion-frontend.md](./planificacion-frontend.md) — bitácoras. Sin firmas de planificación |

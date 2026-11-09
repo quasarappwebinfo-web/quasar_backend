@@ -141,6 +141,7 @@ def template_to_dict(row: TaskTemplate) -> Dict[str, Any]:
         "code": row.code,
         "description": row.description,
         "budget_weight_percent": row.budget_weight_percent,
+        "is_fixed": row.is_fixed or 0,
         "is_active": row.is_active,
         "created_at": row.created_at,
     }
@@ -597,6 +598,8 @@ def _share_budget_weights(db: Session, budget_activity_id: Optional[int]) -> Non
 
 
 async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate:
+    if data.is_fixed not in (0, 1):
+        raise TaskPoolValidationError("is_fixed debe ser 0 o 1")
     cat = db.query(TaskChapter).filter(TaskChapter.id == data.chapter_id).first()
     _require_active_catalog(
         label="capítulo", row=cat, item_id=data.chapter_id, masculine=True
@@ -627,6 +630,7 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         name=data.name,
         code=code,
         description=data.description,
+        is_fixed=1 if data.is_fixed == 1 else 0,
         is_active=1,
     )
     db.add(row)
@@ -669,6 +673,7 @@ async def list_templates(
     zone_id: Optional[int] = None,
     budget_activity_id: Optional[int] = None,
     active_only: bool = False,
+    fixed_only: bool = False,
 ) -> Dict[str, Any]:
     limit = 15
     q = db.query(TaskTemplate).options(
@@ -678,6 +683,8 @@ async def list_templates(
     )
     if active_only:
         q = q.filter(TaskTemplate.is_active == 1)
+    if fixed_only:
+        q = q.filter(TaskTemplate.is_fixed == 1)
     if chapter_id is not None:
         q = q.filter(TaskTemplate.chapter_id == chapter_id)
     if zone_id is not None:
@@ -711,6 +718,8 @@ async def update_template(
     previous_activity_id = row.budget_activity_id
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
+    if "is_fixed" in payload and payload["is_fixed"] not in (0, 1):
+        raise TaskPoolValidationError("is_fixed debe ser 0 o 1")
     if "chapter_id" in payload:
         cat = (
             db.query(TaskChapter)

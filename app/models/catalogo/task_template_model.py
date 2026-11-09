@@ -33,6 +33,8 @@ class TaskTemplate(Base):
     description = Column(Text, nullable=True)
     # % hacia la actividad presupuestal. Lo reparte el backend: 100 / N activas.
     budget_weight_percent = Column(Numeric(6, 2), nullable=True)
+    # 1 = al crear una obra se copia sola como actividad de esa obra.
+    is_fixed = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())

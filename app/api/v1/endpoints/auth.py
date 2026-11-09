@@ -9,6 +9,7 @@ from app.core.limiter import limiter
 from app.core.permissions import has_full_access, permission_codes_of
 from app.models import User
 from app.schemas import AccessTokenResponse, LoginResponse, UserResponse
+from app.schemas.auth_schema import PasswordRecoveryConfirm, PasswordRecoveryRequest
 from app.services.auth_service import (
     InactiveUserError,
     InvalidCredentialsError,
@@ -18,6 +19,17 @@ from app.services.auth_service import (
     issue_refresh_token,
     logout_with_refresh_token,
     rotate_refresh_token,
+)
+from app.services.mail_service import (
+    MailNotConfiguredError,
+    MailSendError,
+    smtp_configured,
+)
+from app.services.password_recovery_service import (
+    REQUEST_MESSAGE,
+    InvalidResetCodeError,
+    confirm_password_reset,
+    request_password_reset,
 )
 from app.services.user_service import user_to_dict
 
@@ -126,6 +138,77 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     logout_with_refresh_token(db, raw)
     clear_refresh_cookie(response)
     return {"message": "Sesión cerrada"}
+
+
+@router.post(
+    "/recuperar",
+    summary="Pedir código para recuperar el acceso",
+    description=(
+        "Público. Responde igual si el usuario existe o no. "
+        "Envía un código al correo cuando el usuario está activo y tiene correo."
+    ),
+)
+@limiter.limit("5/minute")
+async def request_recovery(
+    request: Request,
+    body: PasswordRecoveryRequest,
+    db: Session = Depends(get_db),
+):
+    _ = request
+    if not smtp_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "La recuperación por correo no está disponible. "
+                "Pide a un super admin que restablezca la contraseña."
+            ),
+        )
+    try:
+        request_password_reset(db, body.identifier.strip())
+    except MailNotConfiguredError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "La recuperación por correo no está disponible. "
+                "Pide a un super admin que restablezca la contraseña."
+            ),
+        )
+    except MailSendError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "No se pudo enviar el correo. Intenta de nuevo o pide a un "
+                "super admin que restablezca la contraseña."
+            ),
+        )
+    return {"message": REQUEST_MESSAGE}
+
+
+@router.post(
+    "/recuperar/confirmar",
+    summary="Elegir contraseña nueva con el código",
+    description="Público. El código vence, es de un solo uso y cierra las sesiones.",
+)
+@limiter.limit("10/minute")
+async def confirm_recovery(
+    request: Request,
+    body: PasswordRecoveryConfirm,
+    db: Session = Depends(get_db),
+):
+    _ = request
+    try:
+        confirm_password_reset(
+            db,
+            body.identifier.strip(),
+            body.code.strip(),
+            body.new_password,
+        )
+    except InvalidResetCodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    return {"message": "Contraseña actualizada. Vuelve a iniciar sesión."}
 
 
 @router.get(

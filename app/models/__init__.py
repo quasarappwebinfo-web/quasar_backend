@@ -16,6 +16,7 @@ from app.models.identidad import (
     UserPermission,
     RefreshToken,
     UserNotification,
+    PasswordResetCode,
 )
 from app.models.rrhh import (
     WorkerPosition,
@@ -81,6 +82,7 @@ __all__ = [
     "UserPermission",
     "RefreshToken",
     "UserNotification",
+    "PasswordResetCode",
     "WorkerPosition",
     "Specialty",
     "Worker",

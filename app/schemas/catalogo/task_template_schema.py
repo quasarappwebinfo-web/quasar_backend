@@ -13,6 +13,10 @@ class TaskTemplateCreate(BaseCreateSchema):
     budget_activity_id: int
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    is_fixed: int = Field(
+        0,
+        description="1 si al crear una obra esta actividad se copia sola",
+    )
 
 
 class TaskTemplateUpdate(BaseUpdateSchema):
@@ -21,6 +25,7 @@ class TaskTemplateUpdate(BaseUpdateSchema):
     budget_activity_id: Optional[int] = None
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
+    is_fixed: Optional[int] = None
     is_active: Optional[int] = None
 
 
@@ -35,5 +40,6 @@ class TaskTemplateResponse(BaseResponseSchema):
     code: str
     description: Optional[str] = None
     budget_weight_percent: Optional[Decimal] = None
+    is_fixed: int = 0
     is_active: int
     created_at: Optional[datetime] = None

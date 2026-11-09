@@ -1,6 +1,6 @@
 # Guía del frontend Quasar: Asistencia diaria y gente en tarea
 
-Modelo operativo real (rotación alta). **No** usa cuadrillas fijas.
+Modelo operativo real (rotación alta). **No** usa cuadrillas fijas. El acuse de llegada de esta guía sigue en la app. No tiene que ver con las firmas de planificación, que ya no se usan.
 
 Complementa:
 - [rrhh-frontend.md](./rrhh-frontend.md) — trabajadores / vínculo a obra (periodo)

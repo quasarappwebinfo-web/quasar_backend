@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import is_super_user
 from app.models import Obra, ObraSaleType, ObraStage, ObraStageHistory
 from app.schemas import ObraCreate, ObraStageChange, ObraUpdate
 from app.schemas.obras.obra_schema import OBRA_STATUSES
@@ -19,6 +20,10 @@ class ObraNotFoundError(Exception):
 
 
 class ObraValidationError(Exception):
+    pass
+
+
+class ObraForbiddenError(Exception):
     pass
 
 
@@ -116,7 +121,7 @@ def _append_stage_history(
     return row
 
 
-async def create_obra(db: Session, data: ObraCreate) -> Obra:
+async def create_obra(db: Session, data: ObraCreate, *, created_by: int) -> Obra:
     _validate_status(data.status)
     _ensure_sale_type(db, data.sale_type_id)
 
@@ -143,6 +148,11 @@ async def create_obra(db: Session, data: ObraCreate) -> Obra:
             _append_stage_history(
                 db, obra_id=obra.id, stage_id=data.current_stage_id
             )
+        from app.services.task_service import copy_fixed_activities_to_obra
+
+        copy_fixed_activities_to_obra(
+            db, obra_id=obra.id, created_by=created_by
+        )
         db.commit()
         db.refresh(obra)
         return _load_obra(db, obra.id)
@@ -197,7 +207,9 @@ async def list_obras(
     }
 
 
-async def update_obra(db: Session, obra_id: int, data: ObraUpdate) -> Obra:
+async def update_obra(
+    db: Session, obra_id: int, data: ObraUpdate, *, actor
+) -> Obra:
     obra = db.query(Obra).filter(Obra.id == obra_id).first()
     if not obra:
         raise ObraNotFoundError(f"Obra con ID {obra_id} no encontrada")
@@ -208,6 +220,14 @@ async def update_obra(db: Session, obra_id: int, data: ObraUpdate) -> Obra:
         _validate_status(update_data["status"])
     if "is_active" in update_data and update_data["is_active"] not in (1, 2):
         raise ObraValidationError("is_active debe ser 1 o 2")
+    if (
+        "is_active" in update_data
+        and update_data["is_active"] != obra.is_active
+        and not is_super_user(actor)
+    ):
+        raise ObraForbiddenError(
+            "Solo el super admin puede dar de baja o reactivar una obra."
+        )
     if "sale_type_id" in update_data and update_data["sale_type_id"] is not None:
         _ensure_sale_type(db, update_data["sale_type_id"])
     # current_stage_id no va por update genérico: usar change_obra_stage

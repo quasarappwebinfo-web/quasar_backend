@@ -43,6 +43,7 @@ from app.services.obra_client_document_service import (
 )
 from app.services.obra_service import (
     ObraAlreadyExistsError,
+    ObraForbiddenError,
     ObraNotFoundError,
     ObraValidationError,
     change_obra_stage,
@@ -96,7 +97,10 @@ async def list_obras_endpoint(
 @router.post(
     "",
     summary="Crear obra",
-    description="Cliente no es obligatorio. status por defecto: planning.",
+    description=(
+        "Cliente no es obligatorio. status por defecto: planning. "
+        "Copia a la obra las actividades del catálogo marcadas como fijas."
+    ),
     status_code=status.HTTP_201_CREATED,
 )
 async def create_obra_endpoint(
@@ -104,9 +108,8 @@ async def create_obra_endpoint(
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_OBRAS)),
 ):
-    _ = user_auth
     try:
-        obra = await create_obra(db=db, data=data)
+        obra = await create_obra(db=db, data=data, created_by=user_auth.id)
         return ObraResponse(**obra_to_dict(obra)).model_dump(by_alias=True)
     except ObraAlreadyExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -218,7 +221,7 @@ async def get_obra_endpoint(
 @router.put(
     "/{obra_id}",
     summary="Actualizar obra",
-    description="No cambia etapa (usar PUT .../etapa).",
+    description="No cambia etapa (usar PUT .../etapa). Dar de baja o reactivar exige super admin.",
 )
 async def update_obra_endpoint(
     obra_id: int,
@@ -226,12 +229,15 @@ async def update_obra_endpoint(
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_OBRAS)),
 ):
-    _ = user_auth
     try:
-        obra = await update_obra(db=db, obra_id=obra_id, data=data)
+        obra = await update_obra(
+            db=db, obra_id=obra_id, data=data, actor=user_auth
+        )
         return ObraResponse(**obra_to_dict(obra)).model_dump(by_alias=True)
     except ObraNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ObraForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ObraAlreadyExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ObraValidationError as e:

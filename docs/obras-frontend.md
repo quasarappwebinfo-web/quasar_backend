@@ -1,9 +1,10 @@
 # Guía del frontend Quasar: Obras (Fase 4)
 
-CRUD de obras, clientes, historial de etapas, metadatos de documentos e imagen principal.
+CRUD de obras, clientes, documentos en S3 e imagen principal. El avance que se pinta en la ficha sale de las actividades, no de las etapas.
 
 Complementa:
-- [catalogos-frontend.md](./catalogos-frontend.md) — tipos de venta, etapas, tipos de documento
+- [catalogos-frontend.md](./catalogos-frontend.md) — unidades y demás maestros que sí tienen pantalla
+- [tareas-frontend.md](./tareas-frontend.md) — cumplimiento, bitácora y galería
 - [identidad-frontend.md](./identidad-frontend.md) — personas (clientes)
 - [rrhh-frontend.md](./rrhh-frontend.md) — asignar gente a `obraId`
 
@@ -12,20 +13,17 @@ En el frontend Quasar el access token va en memoria y el refresh en cookie HttpO
 
 ---
 
-## Mapa de pantallas (IA real)
+## Mapa de pantallas
 
-Las obras **no** viven en un módulo “Proyectos” aparte: van en el **Dashboard** (Figma *Dashboard View* + *Project View*).
+El menú dice **Obras** para el listado y **Inicio** para el tablero. `/projects` redirige a `/dashboard`. `/dashboard/maestros/*` también redirige a Inicio: no hay pantalla de tipos de venta, etapas ni tipos de documento.
 
 | Ruta frontend | Pantalla | Contenido |
 |---------------|----------|-----------|
-| `/dashboard` | Listado / KPIs | Tarjetas de obra, búsqueda, “Nueva obra”, KPIs |
-| `/dashboard/obras/:obraId` | Project View | Stepper de etapas, sitio, métricas, admin (etapa/clientes/docs) |
-| `/dashboard/maestros/*` | Maestros de obra | Tipos de venta, etapas, tipos de documento |
-| `/projects` | Redirect | → `/dashboard` |
+| `/dashboard` | Inicio | Tarjetas de obra, búsqueda, “Nueva obra” |
+| `/dashboard/obras/:obraId` | Ficha de la obra | Avance por capítulos y zonas, sitio, bitácora, clientes y archivos |
+| `/dashboard/obras/:obraId/galeria` | Galería | Fotos de la obra, las más nuevas primero |
 
-Sidebar: en el detalle de obra se marca **Proyectos**; en el listado, **Dashboard**.
-
-Carpeta feature: `src/obras/` (APIs, tipos, Dashboard, Project View, maestros).
+Carpeta feature: `src/obras/`. El listado general de actividades vive en `src/task-pool/` y en el menú se llama **Listado General Act.**
 
 ---
 
@@ -39,18 +37,16 @@ Carpeta feature: `src/obras/` (APIs, tipos, Dashboard, Project View, maestros).
 | `completed` | Finalizada / “Lista” en tarjeta |
 | `cancelled` | Cancelada |
 
-`isActive` (`1`/`2`) es baja lógica del registro; **no** sustituye a `status`.
+`isActive` (`1`/`2`) es la baja lógica del registro; **no** sustituye a `status`. Solo el super admin puede cambiarla.
 
-`currentStageId` es la **etapa constructiva** (catálogo `/obras/etapas`), distinta del status.
+`currentStageId` sigue en el API y en el formulario de la obra. **No** es el progreso que se muestra en la ficha. Ese sale de `GET /api/v1/operacion/tareas/cumplimiento`.
 
-### Heurísticas de UI (sin API de avance/tareas aún)
-
-| Señal | Cómo se calcula hoy |
+| Señal en la ficha | Cómo se calcula |
 |--------|---------------------|
-| Progreso % | Índice de `currentStageId` en etapas ordenadas por `displayOrder` (100% si `completed`) |
-| “A tiempo” / “Retraso” | Retraso si `estimatedEndDate` &lt; hoy y la obra no está finalizada/cancelada |
+| **% global obra ejecutada** | Suma de `weightPercent` del capítulo × avance de ese capítulo, sobre todos los capítulos activos. Un capítulo sin `%` aporta 0. No se promedian solo las actividades programadas |
+| **% cumplimiento bitácora actual** | Promedio simple de las actividades del periodo de la bitácora. No es un pedazo de la casa |
+| **Progreso de la construcción** | Una fila por zona activa. En cada fila salen **todos** los capítulos activos, alineados a la izquierda. El `%` va dentro del círculo: verde si es ≥ 100, naranja si es mayor que 0 y menor que 100, gris si es 0. No hay textos «Terminado / En progreso / Siguiente». Un capítulo `isGlobal: 1` usa el promedio de sus actividades en todas las zonas; el resto solo las de esa zona (si no hay, 0) |
 | Personal en sitio | Conteos desde `GET /rrhh/asignaciones?currentOnly=true` |
-| Estado de tareas / “Tareas recientes” | [tareas-frontend.md](./tareas-frontend.md) (Fase 6) |
 
 ---
 
@@ -104,7 +100,7 @@ await fetch(`${API}/api/v1/obras/${obraId}/imagen-principal`, {
 })
 ```
 
-**UI:** en tarjetas del Dashboard y en “Sitio de trabajo” de Project View usar `coverImageUrl` cuando exista; si no, placeholder local.
+**UI:** la portada se muestra completa (`object-fit: contain`) en la tarjeta, en la ficha y en la vista previa del formulario. Las miniaturas de la galería sí recortan (`cover`). Debajo de la portada y de las últimas fotos van **Ver galería** y **Subir fotos**. La galería ordena por fecha de toma o de carga, la más nueva primero.
 
 > Estado frontend Quasar: tipado `coverImageUrl`, upload/quitar en modal de obra, y visualización en tarjetas + Sitio de trabajo.
 
@@ -119,9 +115,9 @@ await fetch(`${API}/api/v1/obras/${obraId}/imagen-principal`, {
 | Cambiar etapa | `PUT /api/v1/obras/{id}/etapa` | — |
 | Historial etapas | `GET /api/v1/obras/{id}/etapas-historial` | `history` |
 | Clientes | `/api/v1/obras/{id}/clientes` · `/api/v1/obras/clientes/{id}` | `clients` |
-| Documentos | `/api/v1/obras/{id}/documentos` · `/api/v1/obras/documentos/{id}` | `documents` |
+| Documentos | `POST /api/v1/obras/{id}/documentos/archivos` · `GET/POST /documentos` · `/api/v1/obras/documentos/{id}` | `documents` |
 
-Catálogos (maestros, CRUD admin):
+Los catálogos de tipo de venta, etapa y tipo de documento siguen en el API. La app no los administra:
 
 | Catálogo | Base | Colección |
 |----------|------|-----------|
@@ -169,10 +165,14 @@ Selects: `?activeOnly=true`. Paginación estándar (`totalItems`, `itemsPerPage`
 - Si envías `currentStageId`, se crea también la primera fila de historial.
 - `code` único si se envía → `409` si duplica.
 - `saleTypeId` debe existir y estar activo.
+- En el mismo guardado se copian las actividades del catálogo con `isFixed: 1` y activas. Quedan programadas (`scheduled`), con el nombre, la descripción, el capítulo, el subcapítulo, la zona y el `%` de la plantilla. La respuesta de la obra no las incluye: cárgalas con `GET /api/v1/operacion/tareas?obraId=`.
+- Si después una no aplica, se quita desde el tablero de actividades de esa obra. El modal pide confirmación. `DELETE /api/v1/operacion/tareas/{id}` deja en `audit_log` quién la quitó y a qué hora. No la borra del catálogo ni de otras obras.
+- Cambiar **Fija** en el catálogo no modifica las obras ya creadas. La siguiente obra usa la lista vigente.
 
 ### Actualizar
 
-`PUT /api/v1/obras/{id}` — datos generales / status / `isActive`.  
+`PUT /api/v1/obras/{id}` — datos generales y status.  
+Cambiar `isActive` (dar de baja o reactivar) solo lo acepta el **super admin**; otro usuario recibe `403`. La ficha muestra el botón únicamente a ese rol.  
 **No** cambies etapa aquí (usar `PUT .../etapa`).
 
 ### Cambiar etapa
@@ -235,27 +235,25 @@ Respuesta: `personName`, `documentNumber`, `role`, `isPrimary`, fechas.
 
 ## 4.3 Documentos
 
-Por ahora: **metadatos + `fileUrl`** (URL ya subida o placeholder). Storage de archivos de documento (S3) aparte de la cover.
+La ficha sube el archivo. No pide tipo ni un enlace. Cada archivo lleva nombre, descripción y si es visible al cliente.
 
-### Listar / crear
+- Máximo **10** archivos por obra y **25 MB** cada uno.
+- Las imágenes se comprimen (en el cliente a JPEG y en el servidor a WebP, lado máx. 2200 px, objetivo ~350 KB).
+- PDF y CAD se guardan tal cual si caben en 25 MB, para que sigan abriendo.
+- Clave S3: `obras/{obraId}/documentos/{uuid}.{ext}`.
+- `document_type_id` quedó nullable. La columna no se elimina. El alta por JSON con `fileUrl` sigue para compatibilidad.
+
+### Subir archivos
+
+`POST /api/v1/obras/{obraId}/documentos/archivos`  
+`multipart/form-data` con cuatro listas del mismo largo: `files`, `names`, `descriptions`, `visibles`.
+
+Respuesta: `{ "documents": [ ... ] }`. `fileUrl` de cada documento es la URL pública o firmada, no la clave cruda.
+
+### Listar y el alta vieja
 
 - `GET /api/v1/obras/{obraId}/documentos?search=&visibleToClient=`
-- `POST /api/v1/obras/{obraId}/documentos`
-
-```json
-{
-  "uuid": null,
-  "documentTypeId": 1,
-  "name": "Licencia",
-  "description": "Permiso municipal",
-  "fileUrl": "https://files.example.com/licencia.pdf",
-  "isVisibleToClient": 1
-}
-```
-
-- Si `uuid` viene vacío/null → el backend genera UUID (sync offline futuro)
-- Si el cliente manda uuid duplicado → `409`
-- `uploadedBy` = usuario autenticado
+- `POST /api/v1/obras/{obraId}/documentos` sigue aceptando JSON con `fileUrl`. `documentTypeId` es opcional.
 
 ### Ver / editar
 
@@ -266,21 +264,20 @@ Por ahora: **metadatos + `fileUrl`** (URL ya subida o placeholder). Storage de a
 
 ## Flujo de pantalla
 
-1. **Maestros** (`/dashboard/maestros`): tipo de venta + etapas (+ tipos documento)
-2. **Dashboard** → Nueva obra (sin cliente; opcional etapa inicial)
-3. Subir **imagen principal** en el modal (crear/editar) → `PUT .../imagen-principal`
-4. Abrir **Project View** → stepper refleja etapas; “Administrar obra” para etapa / clientes / docs
-5. RRHH: asignar trabajadores / cuadrillas con ese `obraId`
-6. (Futuro) tareas reales alimentan métricas y “Tareas recientes”
+1. **Obras** → Nueva obra. El código de la obra no se pide. El cliente es opcional.
+2. Subir **imagen principal** en el modal → `PUT .../imagen-principal`.
+3. Abrir la ficha: progreso por capítulos y zonas, anillos de la casa y de la bitácora, y fotos. Las actividades van en `/dashboard/obras/:obraId/actividades`.
+4. Documentos: **Subir archivos**. Clientes en la misma zona de administración.
+5. RRHH: asignar trabajadores a ese `obraId`.
 
-### Project View — bloques
+### Ficha de la obra — bloques
 
-1. Header: nombre + “Vista General Del Proyecto” + rango de fechas
-2. **Progreso de la construcción** — stepper (Terminado / En progreso / Siguiente)
-3. **Sitio de trabajo** — cover + thumbs (galería completa pendiente)
-4. **Global / Periodo / Estado tareas** — anillos (tareas aún placeholder)
-5. **Tareas recientes** — placeholder → `/tasks`
-6. **Administrar obra** — pestañas Etapas · Clientes · Documentos (+ editar / baja)
+1. Header: nombre y rango de fechas
+2. **Progreso de la construcción** — círculos con el `%` adentro, una línea por zona
+3. **Sitio de trabajo** — portada completa, últimas fotos, **Ver galería** y **Subir fotos**
+4. **% global obra ejecutada** y **% cumplimiento bitácora actual**
+5. Enlace a **Actividades de la obra**, el tablero por capítulo
+6. Clientes y documentos
 
 Modales: overlay a viewport completo (portal a `document.body`); responsive en teléfono.
 
@@ -290,22 +287,16 @@ Modales: overlay a viewport completo (portal a `document.body`); responsive en t
 
 ### Hecho en Quasar (`src/obras/`)
 
-- [x] Obras en Dashboard (no módulo Proyectos aislado)
-- [x] Project View alineada a Figma
-- [x] CRUD obras (crear / editar / `isActive`)
+- [x] Listado de obras en Inicio
+- [x] Ficha con progreso por capítulos y zonas
+- [x] CRUD obras (crear / editar / `isActive`). El código no se muestra
 - [x] Select status con los 5 valores canónicos
-- [x] Cambio de etapa + historial
 - [x] Clientes: roles, primario, cerrar vínculo
-- [x] Documentos: alta con `fileUrl` + flag visible al cliente
-- [x] Manejo `409` en `code` de obra (y mensajes de conflicto en clientes/docs)
-- [x] Maestros: tipos de venta, etapas, tipos de documento
-- [x] Layout responsive (dashboard + project view + modales)
+- [x] Documentos: subida a S3, nombre, descripción y visible al cliente. Sin tipo
+- [x] Portada completa y galería de más nueva a más vieja
+- [x] Layout responsive
 
-### Pendiente / mejorar
+### Sigue en el API y ya no se administra en pantalla
 
-- [x] Tipar y mostrar `coverImageUrl` en tarjetas y Sitio de trabajo
-- [x] Subir / reemplazar / quitar imagen principal (multipart)
-- [ ] Filtros de listado por `status` / `city` / `currentStageId` (hoy: search + `activeOnly`)
-- [ ] Galería de sitio (thumbs reales) cuando exista API
-- [ ] Métricas y listado de tareas cuando exista Fase tareas
-- [ ] KPIs “A tiempo / Retrasadas” con definición de negocio más fina (hoy heurística por `estimatedEndDate`)
+- [x] Tipos de venta, etapas y tipos de documento
+- [x] Alta JSON de documento con `fileUrl`

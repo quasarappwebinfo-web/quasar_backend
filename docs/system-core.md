@@ -1,5 +1,16 @@
 # SYSTEM CORE
 
+## Estado de la app (noviembre 2026)
+
+Este documento es el diseño original. La aplicación que está en uso hoy se apartó de varios puntos. Si hay conflicto, manda lo que dice cada guía de frontend:
+
+- El menú es Inicio, Personal, RRHH, Obras, Bitácoras obras, Galerías obras, Reportes obras y Listado General Act. No hay pantalla de Configuración global. `/dashboard/maestros/*` redirige al inicio.
+- El avance de una obra no es el promedio de lo programado ni un stepper de etapas. Cada capítulo tiene un `%` fijo de la casa. Dentro de la obra, las actividades de ese capítulo se reparten ese `%` en partes iguales. El anillo **% global obra ejecutada** suma `capítulo × avance del capítulo`. Un capítulo sin `%` aporta 0. El anillo **% cumplimiento bitácora actual** es solo el periodo de la bitácora.
+- **Progreso de la construcción** lista, en cada zona, todos los capítulos activos. El `%` va dentro del círculo: verde al 100 %, naranja si ya avanzó, gris en 0. Un capítulo con alcance «En todas las zonas» (`isGlobal: 1`) repite el mismo avance en cada zona.
+- En la interfaz, la actividad presupuestal se llama **subcapítulo**. No se pide código ni orden. Una actividad registrada nueva recibe un código interno `ACT-…` que no se muestra.
+- Los documentos de la obra se suben a S3 (hasta 10 archivos, 25 MB cada uno). No se pide tipo ni un enlace. Las imágenes se comprimen.
+- Las **firmas de planificación no se usan**. Las tablas siguen en la base, pero la app no pide firmantes ni deja un plan inmutable: todo plan se muestra como Borrador y se puede editar. La llegada del día en la obra sí conserva el acuse.
+
 ## 1. Propósito del sistema
 
 Este sistema es una plataforma de gestión integral de obras de construcción.
@@ -14,7 +25,7 @@ Su propósito principal es permitir que una empresa constructora pueda:
 - Administrar dependencias entre actividades.
 - Asignar trabajadores y cuadrillas.
 - Obtener recomendaciones de distribución de recursos.
-- Formalizar las planificaciones mediante firmas.
+- Dejar el periodo de la bitácora como borrador editable. Las firmas de planificación no se usan en la app de hoy.
 - Ejecutar y hacer seguimiento de las actividades.
 - Registrar retrasos, reprogramaciones y sus motivos.
 - Registrar instrucciones, comentarios y notas.
@@ -701,7 +712,9 @@ La versión anterior permanece intacta.
 
 # 23. Regla fundamental de las firmas
 
-Una firma representa la aprobación de una versión específica de una planificación.
+Este bloque y los que siguen sobre firmantes describen el diseño original. La app de hoy no pide ni guarda firmas de planificación. El acuse de llegada del día sí se conserva.
+
+Una firma, en ese diseño, representa la aprobación de una versión específica de una planificación.
 
 La firma NO representa simplemente:
 
