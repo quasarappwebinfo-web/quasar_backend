@@ -351,7 +351,7 @@ npm run build
 ```bash
 cd /srv/quasar/staging/backend
 git pull
-docker compose -f docker-compose.staging.yml --env-file .env up -d
+docker compose -f docker-compose.staging.yml --env-file .env up -d --build
 docker compose -f docker-compose.staging.yml --env-file .env exec backend alembic upgrade head
 ```
 

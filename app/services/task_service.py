@@ -579,8 +579,14 @@ async def list_tasks(
     date_to: Optional[date] = None,
     parent_only: bool = True,
     parent_task_id: Optional[int] = None,
+    task_ids: Optional[List[int]] = None,
     limit: int = 50,
 ) -> Dict[str, Any]:
+    if task_ids is not None and len(task_ids) == 0:
+        return {
+            "tasks": [],
+            "pagination": _pagination(0, page, limit),
+        }
     q = db.query(Task).options(*_task_load_options())
 
     if obra_id is not None:
@@ -610,6 +616,8 @@ async def list_tasks(
         )
     if chapter_id is not None:
         q = q.filter(Task.chapter_id == chapter_id)
+    if task_ids is not None:
+        q = q.filter(Task.id.in_(task_ids))
 
     total = q.count()
     rows = (
@@ -624,6 +632,44 @@ async def list_tasks(
     }
 
 
+def list_obra_bitacoras(db: Session, obra_id: int) -> List[Dict[str, Any]]:
+    """Semanas de bitácora de la obra, de la más reciente a la más antigua."""
+    rows = (
+        db.query(WorkPlan)
+        .filter(WorkPlan.obra_id == obra_id)
+        .order_by(WorkPlan.start_date.desc(), WorkPlan.id.desc())
+        .all()
+    )
+    from app.services.work_plan_service import refresh_plan_lifecycle
+
+    refresh_plan_lifecycle(db, rows)
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "startDate": row.start_date,
+            "endDate": row.end_date,
+            "status": row.status,
+        }
+        for row in rows
+    ]
+
+
+def _bitacora_task_ids(db: Session, obra_id: int, plan_id: int) -> List[int]:
+    """Actividades de la versión vigente de esa bitácora semanal."""
+    plan = db.query(WorkPlan).filter(WorkPlan.id == plan_id).first()
+    if not plan or plan.obra_id != obra_id:
+        raise TaskOpValidationError("Esa bitácora no pertenece a esta obra")
+    if not plan.current_version_id:
+        return []
+    return [
+        row[0]
+        for row in db.query(WorkPlanTask.task_id)
+        .filter(WorkPlanTask.work_plan_version_id == plan.current_version_id)
+        .all()
+    ]
+
+
 async def list_board(
     db: Session,
     *,
@@ -631,8 +677,12 @@ async def list_board(
     chapter_id: Optional[int] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    plan_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Kanban: tareas padre agrupadas por status."""
+    task_ids = (
+        _bitacora_task_ids(db, obra_id, plan_id) if plan_id is not None else None
+    )
     result = await list_tasks(
         db,
         page=1,
@@ -641,6 +691,7 @@ async def list_board(
         date_from=date_from,
         date_to=date_to,
         parent_only=True,
+        task_ids=task_ids,
         limit=500,
     )
     columns: Dict[str, List[Dict[str, Any]]] = {s: [] for s in TASK_STATUSES}
@@ -863,6 +914,74 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
     }
 
 
+def _blend_opening(measured: Decimal, opening) -> Decimal:
+    """El porcentaje declarado es el piso. Lo que se complete después sube desde ahí."""
+    if opening is None:
+        return measured.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if opening.mode == "completed":
+        return Decimal("100")
+    base = Decimal(str(opening.progress_percent or 0))
+    value = base + (Decimal("100") - base) * measured / Decimal("100")
+    if value > 100:
+        value = Decimal("100")
+    return value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
+def _openings_by_obra(db: Session, obra_ids: List[int]) -> Dict[int, Dict[int, Any]]:
+    from app.models import ObraChapterOpening
+
+    if not obra_ids:
+        return {}
+    rows = (
+        db.query(ObraChapterOpening)
+        .filter(ObraChapterOpening.obra_id.in_(obra_ids))
+        .all()
+    )
+    grouped: Dict[int, Dict[int, Any]] = {}
+    for row in rows:
+        grouped.setdefault(row.obra_id, {})[row.chapter_id] = row
+    return grouped
+
+
+def _apply_chapter_openings(
+    built: Dict[str, Any],
+    openings: Dict[int, Any],
+    catalog_chapters: List[TaskChapter],
+) -> Dict[str, Any]:
+    if not openings:
+        return built
+    catalog = {chapter.id: chapter for chapter in catalog_chapters}
+    rows = []
+    parts = []
+    seen = set()
+    for row, part in zip(built["chapters"], built["parts"]):
+        chapter_id = row["chapter_id"]
+        opening = openings.get(chapter_id) if chapter_id is not None else None
+        progress = _blend_opening(Decimal(str(part[2])), opening)
+        rows.append({**row, "progress_percent": progress})
+        parts.append((part[0], part[1], progress))
+        if chapter_id is not None:
+            seen.add(chapter_id)
+    for chapter_id, opening in openings.items():
+        if chapter_id in seen:
+            continue
+        chapter = catalog.get(chapter_id)
+        if chapter is None:
+            continue
+        progress = _blend_opening(Decimal("0"), opening)
+        rows.append(
+            {
+                "chapter_id": chapter.id,
+                "chapter_name": chapter.name,
+                "weight_percent": chapter.weight_percent,
+                "progress_percent": progress,
+                "budget_activities": [],
+            }
+        )
+        parts.append((chapter.id, chapter.weight_percent, progress))
+    return {"chapters": rows, "parts": parts}
+
+
 def house_progress_by_obra(
     db: Session, obra_ids: List[int]
 ) -> Dict[int, Decimal]:
@@ -896,10 +1015,15 @@ def house_progress_by_obra(
     catalog_chapters = (
         db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
     )
+    openings = _openings_by_obra(db, obra_ids)
     progress: Dict[int, Decimal] = {}
     for obra_id in obra_ids:
         rows = list(by_obra.get(obra_id, {}).values())
-        built = _chapters_from_tasks(rows)
+        built = _apply_chapter_openings(
+            _chapters_from_tasks(rows),
+            openings.get(obra_id, {}),
+            catalog_chapters,
+        )
         progress[obra_id] = _house_progress(built["parts"], catalog_chapters)
     return progress
 
@@ -941,6 +1065,7 @@ def _zone_board(
     tasks: List[Task],
     catalog_chapters: List[TaskChapter],
     catalog_zones: List[TaskZone],
+    openings: Optional[Dict[int, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Cada zona lista todos los capítulos. El global repite el mismo avance."""
     by_chapter: Dict[int, List[Task]] = {}
@@ -966,11 +1091,14 @@ def _zone_board(
         rows = []
         for chapter in chapters:
             if chapter.is_global == 1:
-                progress = _average_progress(by_chapter.get(chapter.id, []))
+                measured = _average_progress(by_chapter.get(chapter.id, []))
             else:
-                progress = _average_progress(
+                measured = _average_progress(
                     by_chapter_zone.get((chapter.id, zone.id), [])
                 )
+            progress = _blend_opening(
+                measured, (openings or {}).get(chapter.id)
+            )
             rows.append(
                 {
                     "chapter_id": chapter.id,
@@ -1077,6 +1205,8 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
     catalog_chapters = (
         db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
     )
+    openings = _openings_by_obra(db, [obra_id]).get(obra_id, {})
+    built = _apply_chapter_openings(built, openings, catalog_chapters)
     catalog_zones = db.query(TaskZone).filter(TaskZone.is_active == 1).all()
     plan = _period_plan(db, obra_id)
     period = None
@@ -1102,7 +1232,7 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
         "obra_id": obra_id,
         "progress_percent": _house_progress(built["parts"], catalog_chapters),
         "chapters": built["chapters"],
-        "zones": _zone_board(tasks, catalog_chapters, catalog_zones),
+        "zones": _zone_board(tasks, catalog_chapters, catalog_zones, openings),
         "period": period,
         "activity_status": _activity_status(status_tasks),
     }
@@ -1146,6 +1276,43 @@ def _estimate_duration(
     return (base_days * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _spawn_catalog_task(
+    db: Session,
+    *,
+    obra_id: int,
+    template: TaskTemplate,
+    created_by: int,
+    status: str,
+    reason: str,
+) -> Task:
+    task = Task(
+        uuid=str(uuid_lib.uuid4()),
+        obra_id=obra_id,
+        source_template_id=template.id,
+        source_template_version_id=None,
+        parent_task_id=None,
+        name=template.name,
+        description=template.description,
+        status=status,
+        budget_weight_percent=template.budget_weight_percent,
+        chapter_id=template.chapter_id,
+        budget_activity_id=template.budget_activity_id,
+        zone_id=template.zone_id,
+        created_by=created_by,
+    )
+    db.add(task)
+    db.flush()
+    _append_history(
+        db,
+        task_id=task.id,
+        from_status=None,
+        to_status=status,
+        changed_by=created_by,
+        reason=reason,
+    )
+    return task
+
+
 def copy_fixed_activities_to_obra(
     db: Session, *, obra_id: int, created_by: int
 ) -> None:
@@ -1157,31 +1324,130 @@ def copy_fixed_activities_to_obra(
         .all()
     )
     for tpl in templates:
-        task = Task(
-            uuid=str(uuid_lib.uuid4()),
-            obra_id=obra_id,
-            source_template_id=tpl.id,
-            source_template_version_id=None,
-            parent_task_id=None,
-            name=tpl.name,
-            description=tpl.description,
-            status=STATUS_SCHEDULED,
-            budget_weight_percent=tpl.budget_weight_percent,
-            chapter_id=tpl.chapter_id,
-            budget_activity_id=tpl.budget_activity_id,
-            zone_id=tpl.zone_id,
-            created_by=created_by,
-        )
-        db.add(task)
-        db.flush()
-        _append_history(
+        _spawn_catalog_task(
             db,
-            task_id=task.id,
-            from_status=None,
-            to_status=STATUS_SCHEDULED,
-            changed_by=created_by,
+            obra_id=obra_id,
+            template=tpl,
+            created_by=created_by,
+            status=STATUS_SCHEDULED,
             reason="Copiada al crear la obra porque la actividad está marcada como fija",
         )
+
+
+def seed_obra_with_openings(
+    db: Session,
+    *,
+    obra_id: int,
+    created_by: int,
+    openings,
+) -> None:
+    """Programa la obra. Los capítulos marcados no usan el copiado completo.
+
+    Completado: sus actividades fijas nacen hechas y el capítulo queda en 100%.
+    A medias: solo se crean las actividades elegidas, y el capítulo arranca
+    en el porcentaje indicado. El resto de capítulos se programa como siempre.
+    No hace commit.
+    """
+    from app.models import ObraChapterOpening
+
+    templates = (
+        db.query(TaskTemplate)
+        .filter(TaskTemplate.is_active == 1)
+        .order_by(TaskTemplate.name.asc())
+        .all()
+    )
+    fixed_by_chapter: Dict[Optional[int], List[TaskTemplate]] = {}
+    by_id = {}
+    for template in templates:
+        by_id[template.id] = template
+        if template.is_fixed == 1:
+            fixed_by_chapter.setdefault(template.chapter_id, []).append(template)
+
+    active_ids = {
+        row.id
+        for row in db.query(TaskChapter.id).filter(TaskChapter.is_active == 1).all()
+    }
+    claimed = set()
+    for opening in openings:
+        chapter_id = opening.chapter_id
+        if chapter_id in claimed:
+            raise TaskOpValidationError("Un capítulo está repetido en el avance inicial")
+        if chapter_id not in active_ids:
+            raise TaskOpValidationError(f"El capítulo {chapter_id} no existe o está inactivo")
+        claimed.add(chapter_id)
+        mode = (opening.mode or "").strip()
+        if mode == "completed":
+            if opening.template_ids:
+                raise TaskOpValidationError(
+                    "Un capítulo completado no lleva actividades elegidas"
+                )
+            for template in fixed_by_chapter.get(chapter_id, []):
+                _spawn_catalog_task(
+                    db,
+                    obra_id=obra_id,
+                    template=template,
+                    created_by=created_by,
+                    status=STATUS_COMPLETED,
+                    reason="Marcada como hecha al crear la obra: el capítulo ya venía completado",
+                )
+            db.add(
+                ObraChapterOpening(
+                    obra_id=obra_id,
+                    chapter_id=chapter_id,
+                    mode="completed",
+                    progress_percent=Decimal("100"),
+                )
+            )
+            continue
+        if mode != "partial":
+            raise TaskOpValidationError(
+                "El avance inicial de un capítulo es completado o a medias"
+            )
+        percent = opening.progress_percent
+        if percent is None:
+            raise TaskOpValidationError(
+                "Indica el porcentaje con el que llega el capítulo a medias"
+            )
+        chosen = list(dict.fromkeys(opening.template_ids or []))
+        if not chosen:
+            raise TaskOpValidationError(
+                "En un capítulo a medias elige al menos una actividad del pool"
+            )
+        for template_id in chosen:
+            template = by_id.get(template_id)
+            if template is None or template.chapter_id != chapter_id:
+                raise TaskOpValidationError(
+                    "Hay una actividad que no pertenece a ese capítulo o está inactiva"
+                )
+            _spawn_catalog_task(
+                db,
+                obra_id=obra_id,
+                template=template,
+                created_by=created_by,
+                status=STATUS_SCHEDULED,
+                reason="Elegida al crear la obra porque el capítulo llega a medias",
+            )
+        db.add(
+            ObraChapterOpening(
+                obra_id=obra_id,
+                chapter_id=chapter_id,
+                mode="partial",
+                progress_percent=Decimal(str(percent)),
+            )
+        )
+
+    for chapter_id, chapter_templates in fixed_by_chapter.items():
+        if chapter_id in claimed:
+            continue
+        for template in chapter_templates:
+            _spawn_catalog_task(
+                db,
+                obra_id=obra_id,
+                template=template,
+                created_by=created_by,
+                status=STATUS_SCHEDULED,
+                reason="Copiada al crear la obra porque la actividad está marcada como fija",
+            )
 
 
 def add_task_from_catalog(

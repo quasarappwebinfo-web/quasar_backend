@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -669,6 +669,7 @@ async def list_templates(
     zone_id: Optional[int] = None,
     budget_activity_id: Optional[int] = None,
     active_only: bool = False,
+    fixed_only: bool = False,
 ) -> Dict[str, Any]:
     limit = 15
     q = db.query(TaskTemplate).options(
@@ -678,6 +679,8 @@ async def list_templates(
     )
     if active_only:
         q = q.filter(TaskTemplate.is_active == 1)
+    if fixed_only:
+        q = q.filter(TaskTemplate.is_fixed == 1)
     if chapter_id is not None:
         q = q.filter(TaskTemplate.chapter_id == chapter_id)
     if zone_id is not None:
@@ -686,7 +689,15 @@ async def list_templates(
         q = q.filter(TaskTemplate.budget_activity_id == budget_activity_id)
     if search:
         term = f"%{search.strip()}%"
-        q = q.filter(TaskTemplate.name.ilike(term))
+        q = q.filter(
+            or_(
+                TaskTemplate.name.ilike(term),
+                TaskTemplate.description.ilike(term),
+                TaskTemplate.chapter.has(TaskChapter.name.ilike(term)),
+                TaskTemplate.budget_activity.has(TaskBudgetActivity.name.ilike(term)),
+                TaskTemplate.zone.has(TaskZone.name.ilike(term)),
+            )
+        )
     total = q.count()
     rows = (
         q.order_by(TaskTemplate.name.asc())

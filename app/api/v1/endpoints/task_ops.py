@@ -121,12 +121,23 @@ async def list_tasks(
         _err(e)
 
 
+@router.get("/bitacoras", summary="Bitácoras semanales de una obra")
+async def bitacoras(
+    obra_id: int = Query(..., alias="obraId"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    _ = user_auth
+    return {"bitacoras": svc.list_obra_bitacoras(db, obra_id)}
+
+
 @router.get("/tablero", summary="Kanban por obra (columnas de status)")
 async def board(
     obra_id: int = Query(..., alias="obraId"),
     chapter_id: Optional[int] = Query(None, alias="chapterId"),
     date_from: Optional[date] = Query(None, alias="dateFrom"),
     date_to: Optional[date] = Query(None, alias="dateTo"),
+    plan_id: Optional[int] = Query(None, alias="planId"),
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
 ):
@@ -138,6 +149,7 @@ async def board(
             chapter_id=chapter_id,
             date_from=date_from,
             date_to=date_to,
+            plan_id=plan_id,
         )
         return {
             "obraId": result["obraId"],

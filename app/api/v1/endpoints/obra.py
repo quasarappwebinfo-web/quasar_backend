@@ -99,7 +99,8 @@ async def list_obras_endpoint(
     summary="Crear obra",
     description=(
         "Cliente no es obligatorio. status por defecto: planning. "
-        "Copia a la obra las actividades del catálogo marcadas como fijas."
+        "Copia a la obra las actividades del catálogo marcadas como fijas. "
+        "El super admin puede marcar capítulos completados o a medias."
     ),
     status_code=status.HTTP_201_CREATED,
 )
@@ -109,10 +110,12 @@ async def create_obra_endpoint(
     user_auth: User = Depends(require_permission(PERMISSION_OBRAS)),
 ):
     try:
-        obra = await create_obra(db=db, data=data, created_by=user_auth.id)
+        obra = await create_obra(db=db, data=data, created_by=user_auth.id, actor=user_auth)
         return ObraResponse(**obra_to_dict(obra)).model_dump(by_alias=True)
     except ObraAlreadyExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ObraForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ObraValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
