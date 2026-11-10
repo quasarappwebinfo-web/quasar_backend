@@ -92,7 +92,7 @@ Si no hay, cae a asignación larga duración; luego cuadrilla (legacy).
 
 | Ruta | Contenido |
 |------|-----------|
-| `/dashboard/obras/:obraId/asistencia` | Día + presentes (registra admin, inmutable) |
+| `/dashboard/obras/:obraId/asistencia` | Día elegido, cantidad de personas, listado, registro de llegada, informe Excel de la semana y gráfica de los 7 días. Sin “a tiempo” ni “x / total”. |
 | Detalle tarea | “Hoy trabajan…” + historial |
 | Project View | CTA “Asistencia de hoy” |
 
@@ -104,5 +104,5 @@ Si no hay, cae a asignación larga duración; luego cuadrilla (legacy).
 - [x] API gente-día en tarea (historial soft)
 - [x] primaryAssignee usa gente de hoy
 - [x] Cuadrillas marcadas deprecated
-- [ ] Front: pantalla asistencia + drawer de tarea
-- [ ] Project View CTA
+- [x] Front: pantalla de llegadas de la obra y enlace desde la ficha
+- [ ] Drawer de tarea

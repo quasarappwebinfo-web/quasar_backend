@@ -863,6 +863,47 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
     }
 
 
+def house_progress_by_obra(
+    db: Session, obra_ids: List[int]
+) -> Dict[int, Decimal]:
+    """Cumplimiento global de cada obra, el mismo cálculo de la ficha."""
+    if not obra_ids:
+        return {}
+    tasks = (
+        db.query(Task)
+        .options(
+            joinedload(Task.subtasks),
+            joinedload(Task.chapter),
+            joinedload(Task.budget_activity),
+            joinedload(Task.zone),
+            joinedload(Task.source_template).options(
+                joinedload(TaskTemplate.chapter),
+                joinedload(TaskTemplate.budget_activity),
+            ),
+            joinedload(Task.source_template_version)
+            .joinedload(TaskTemplateVersion.task_template)
+            .options(
+                joinedload(TaskTemplate.chapter),
+                joinedload(TaskTemplate.budget_activity),
+            ),
+        )
+        .filter(Task.obra_id.in_(obra_ids), Task.parent_task_id.is_(None))
+        .all()
+    )
+    by_obra: Dict[int, Dict[int, Task]] = {}
+    for task in tasks:
+        by_obra.setdefault(task.obra_id, {})[task.id] = task
+    catalog_chapters = (
+        db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
+    )
+    progress: Dict[int, Decimal] = {}
+    for obra_id in obra_ids:
+        rows = list(by_obra.get(obra_id, {}).values())
+        built = _chapters_from_tasks(rows)
+        progress[obra_id] = _house_progress(built["parts"], catalog_chapters)
+    return progress
+
+
 def _house_progress(
     parts: List[Tuple[Optional[int], Optional[Decimal], Decimal]],
     catalog_chapters: List[TaskChapter],
@@ -2464,7 +2505,7 @@ async def list_obra_photo_gallery(
     task_id: Optional[int] = None,
     kind: Optional[str] = None,
     page: int = 1,
-    limit: int = 24,
+    limit: int = 20,
 ) -> Dict[str, Any]:
     """Fotos de evidencia de una obra, de la más reciente a la más antigua."""
     from app.services.obra_photo_service import list_gallery_items

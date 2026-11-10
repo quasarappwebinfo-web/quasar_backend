@@ -197,8 +197,16 @@ async def list_obras(
 
     total_items = query.count()
     rows = query.order_by(Obra.id.desc()).offset(offset).limit(limit_per_page).all()
+    from app.services.task_service import house_progress_by_obra
+
+    progress = house_progress_by_obra(db, [obra.id for obra in rows])
+    obras = []
+    for obra in rows:
+        item = obra_to_dict(obra)
+        item["progress_percent"] = progress.get(obra.id)
+        obras.append(item)
     return {
-        "obras": [obra_to_dict(o) for o in rows],
+        "obras": obras,
         "pagination": {
             "totalItems": total_items,
             "itemsPerPage": limit_per_page,
