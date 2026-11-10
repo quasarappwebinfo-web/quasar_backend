@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid as uuid_lib
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +45,9 @@ STATUS_DRAFT = "draft"
 STATUS_PENDING = "pending_signature"
 STATUS_SIGNED = "signed"
 STATUS_REJECTED = "rejected"
+STATUS_IN_EXECUTION = "in_execution"
+STATUS_FINISHED = "finished"
+_DONE_TASK_STATUSES = {"completed", "verified"}
 
 SIGNER_SIGNED = "signed"
 
@@ -289,6 +293,44 @@ def _require_draft_plan(plan: WorkPlan) -> None:
     _ = plan
 
 
+def _today_colombia() -> date:
+    return datetime.now(ZoneInfo("America/Bogota")).date()
+
+
+def refresh_plan_lifecycle(db: Session, plans: List[WorkPlan]) -> None:
+    """En ejecución al existir. Finalizado si venció el periodo o todas quedaron cumplidas."""
+    if not plans:
+        return
+    today = _today_colombia()
+    version_ids = [plan.current_version_id for plan in plans if plan.current_version_id]
+    statuses_by_version: Dict[int, List[str]] = {}
+    if version_ids:
+        rows = (
+            db.query(WorkPlanTask.work_plan_version_id, Task.status)
+            .join(Task, Task.id == WorkPlanTask.task_id)
+            .filter(WorkPlanTask.work_plan_version_id.in_(version_ids))
+            .all()
+        )
+        for version_id, task_status in rows:
+            statuses_by_version.setdefault(version_id, []).append(task_status)
+
+    changed = False
+    for plan in plans:
+        task_statuses = statuses_by_version.get(plan.current_version_id or 0, [])
+        period_ended = plan.end_date < today
+        all_done = bool(task_statuses) and all(
+            status in _DONE_TASK_STATUSES for status in task_statuses
+        )
+        next_status = (
+            STATUS_FINISHED if period_ended or all_done else STATUS_IN_EXECUTION
+        )
+        if plan.status != next_status:
+            plan.status = next_status
+            changed = True
+    if changed:
+        db.commit()
+
+
 def _require_editable_version(db: Session, version: WorkPlanVersion) -> WorkPlan:
     plan = db.query(WorkPlan).filter(WorkPlan.id == version.work_plan_id).first()
     if not plan:
@@ -303,6 +345,7 @@ async def get_plan(db: Session, plan_id: int) -> WorkPlan:
     row = _load_plan(db, plan_id)
     if not row:
         raise WorkPlanNotFoundError(f"Planificación {plan_id} no encontrada")
+    refresh_plan_lifecycle(db, [row])
     return row
 
 
@@ -318,21 +361,20 @@ async def list_plans(
     q = db.query(WorkPlan).options(*_plan_options())
     if obra_id is not None:
         q = q.filter(WorkPlan.obra_id == obra_id)
-    if status:
-        if status not in WORK_PLAN_STATUSES:
-            raise WorkPlanValidationError(
-                f"status inválido. Valores: {', '.join(WORK_PLAN_STATUSES)}"
-            )
-        q = q.filter(WorkPlan.status == status)
+    if status and status not in WORK_PLAN_STATUSES:
+        raise WorkPlanValidationError(
+            f"status inválido. Valores: {', '.join(WORK_PLAN_STATUSES)}"
+        )
     if search:
         q = q.filter(WorkPlan.name.ilike(f"%{search.strip()}%"))
-    total = q.count()
-    rows = (
-        q.order_by(WorkPlan.start_date.desc(), WorkPlan.id.desc())
-        .offset((page - 1) * limit)
-        .limit(limit)
-        .all()
-    )
+    rows = q.order_by(WorkPlan.start_date.desc(), WorkPlan.id.desc()).all()
+    refresh_plan_lifecycle(db, rows)
+    if status in (STATUS_IN_EXECUTION, STATUS_FINISHED):
+        rows = [row for row in rows if row.status == status]
+    elif status:
+        rows = [row for row in rows if row.status == status]
+    total = len(rows)
+    rows = rows[(page - 1) * limit : page * limit]
     return {
         "workPlans": [plan_to_dict(r) for r in rows],
         "pagination": _pagination(total, page, limit),
@@ -476,7 +518,7 @@ async def create_plan(
         name=data.name,
         start_date=data.start_date,
         end_date=data.end_date,
-        status=STATUS_DRAFT,
+        status=STATUS_IN_EXECUTION,
         requested_by=requested_by,
     )
     db.add(plan)
@@ -751,7 +793,7 @@ async def create_new_version(
         db.add(_snapshot_from_task(db, version_id=version.id, task=task))
 
     plan.current_version_id = version.id
-    plan.status = STATUS_DRAFT
+    plan.status = STATUS_IN_EXECUTION
     _append_event(
         db,
         version_id=version.id,

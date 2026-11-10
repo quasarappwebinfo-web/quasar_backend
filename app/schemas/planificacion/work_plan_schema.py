@@ -7,7 +7,14 @@ from pydantic import Field
 
 from app.schemas.base import BaseCreateSchema, BaseResponseSchema, BaseSchema, BaseUpdateSchema
 
-WORK_PLAN_STATUSES = ("draft", "pending_signature", "signed", "rejected")
+WORK_PLAN_STATUSES = (
+    "draft",
+    "pending_signature",
+    "signed",
+    "rejected",
+    "in_execution",
+    "finished",
+)
 SIGNER_STATUSES = ("pending", "signed", "rejected")
 SIGNATURE_TYPES = ("electronic", "acknowledgment")
 SIGNATURE_EVENT_TYPES = (

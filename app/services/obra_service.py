@@ -121,9 +121,15 @@ def _append_stage_history(
     return row
 
 
-async def create_obra(db: Session, data: ObraCreate, *, created_by: int) -> Obra:
+async def create_obra(db: Session, data: ObraCreate, *, created_by: int, actor) -> Obra:
     _validate_status(data.status)
     _ensure_sale_type(db, data.sale_type_id)
+
+    openings = list(data.chapter_openings or [])
+    if openings and not is_super_user(actor):
+        raise ObraForbiddenError(
+            "Solo el super admin puede marcar capítulos al crear la obra"
+        )
 
     if data.current_stage_id is not None:
         _ensure_stage(db, data.current_stage_id)
@@ -148,14 +154,32 @@ async def create_obra(db: Session, data: ObraCreate, *, created_by: int) -> Obra
             _append_stage_history(
                 db, obra_id=obra.id, stage_id=data.current_stage_id
             )
-        from app.services.task_service import copy_fixed_activities_to_obra
-
-        copy_fixed_activities_to_obra(
-            db, obra_id=obra.id, created_by=created_by
+        from app.services.task_service import (
+            TaskOpValidationError,
+            copy_fixed_activities_to_obra,
+            seed_obra_with_openings,
         )
+
+        if openings:
+            seed_obra_with_openings(
+                db,
+                obra_id=obra.id,
+                created_by=created_by,
+                openings=openings,
+            )
+        else:
+            copy_fixed_activities_to_obra(
+                db, obra_id=obra.id, created_by=created_by
+            )
         db.commit()
         db.refresh(obra)
         return _load_obra(db, obra.id)
+    except ObraValidationError:
+        db.rollback()
+        raise
+    except TaskOpValidationError as exc:
+        db.rollback()
+        raise ObraValidationError(str(exc)) from exc
     except Exception:
         db.rollback()
         raise

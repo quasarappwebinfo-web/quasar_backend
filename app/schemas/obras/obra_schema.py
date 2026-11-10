@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import Field
 
@@ -8,6 +8,15 @@ from app.schemas.base import BaseCreateSchema, BaseResponseSchema, BaseSchema, B
 
 OBRA_STATUSES = ("planning", "in_progress", "on_hold", "completed", "cancelled")
 OBRA_CLIENT_ROLES = ("comprador", "propietario", "contacto")
+
+
+class ObraChapterOpening(BaseSchema):
+    """Cómo llega un capítulo cuando la obra ya venía empezada."""
+
+    chapter_id: int
+    mode: str = Field(..., max_length=20)
+    progress_percent: Optional[int] = Field(None, ge=1, le=99)
+    template_ids: List[int] = Field(default_factory=list)
 
 
 class ObraCreate(BaseCreateSchema):
@@ -20,6 +29,7 @@ class ObraCreate(BaseCreateSchema):
     estimated_end_date: Optional[date] = None
     current_stage_id: Optional[int] = None
     status: str = Field("planning", max_length=30)
+    chapter_openings: Optional[List[ObraChapterOpening]] = None
 
 
 class ObraUpdate(BaseUpdateSchema):

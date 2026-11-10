@@ -51,6 +51,7 @@ from app.models.catalogo import (
 )
 from app.models.operacion import (
     DelayReason,
+    ObraChapterOpening,
     Task,
     TaskAssignment,
     TaskCrewAssignment,
@@ -109,6 +110,7 @@ __all__ = [
     "TaskTemplateSubtask",
     "TaskTemplateDependency",
     "DelayReason",
+    "ObraChapterOpening",
     "Task",
     "TaskAssignment",
     "TaskCrewAssignment",

@@ -1,4 +1,5 @@
 from app.models.operacion.delay_reason_model import DelayReason
+from app.models.operacion.obra_chapter_opening_model import ObraChapterOpening
 from app.models.operacion.task_model import Task
 from app.models.operacion.task_assignment_model import TaskAssignment
 from app.models.operacion.task_crew_assignment_model import TaskCrewAssignment
@@ -15,6 +16,7 @@ from app.models.operacion.task_document_model import TaskDocument
 
 __all__ = [
     "DelayReason",
+    "ObraChapterOpening",
     "Task",
     "TaskAssignment",
     "TaskCrewAssignment",
