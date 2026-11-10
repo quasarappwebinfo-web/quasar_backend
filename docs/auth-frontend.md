@@ -204,8 +204,6 @@ Con **axios**: `axios.defaults.withCredentials = true` y el header `Authorizatio
 | `POST` | `/api/v1/auth/refresh` | Envía + rota cookie | No |
 | `POST` | `/api/v1/auth/logout` | Revoca y borra cookie | No |
 | `GET` | `/api/v1/auth/me` | No hace falta | Sí |
-| `POST` | `/api/v1/auth/recuperar` | No | No |
-| `POST` | `/api/v1/auth/recuperar/confirmar` | No | No |
 
 Variables útiles:
 
@@ -215,56 +213,6 @@ Variables útiles:
 - `CORS_ORIGINS=...` con la URL exacta del frontend
 
 Si fallan las cookies: ¿`credentials: 'include'`? ¿origen en CORS?
-
----
-
-## Recuperar el acceso
-
-Pantalla pública, sin token. Hace falta red. En obra sin señal no hay forma de recuperar la clave: el primer ingreso ya exige internet.
-
-Dos pasos. El usuario escribe su **usuario o su correo**.
-
-### 1. Pedir el código
-
-`POST /api/v1/auth/recuperar`
-
-```json
-{ "identifier": "juan.supervisor" }
-```
-
-`identifier` es el usuario (tal cual está guardado) o el correo.
-
-| Respuesta | Qué mostrar |
-|-----------|-------------|
-| `200` | «Si el usuario tiene correo, enviamos un código. Revisa la bandeja. Si no tienes correo, pídele a un super admin que restablezca la clave.» El texto es el mismo haya o no cuenta: no digas si el usuario existe |
-| `503` | El `detail`: el correo no está configurado o no se pudo enviar. Ofrece pedir el restablecimiento a un super admin |
-| `429` | Demasiados intentos. Espera un minuto |
-
-El código dura **15 minutos**, es de **6 dígitos** y de un solo uso. Un reenvío antes de 60 segundos no manda otro correo; el anterior sigue vigente. El correo también trae el **usuario**, por si lo que olvidó fue el nombre.
-
-Solo sale correo si el usuario está activo y tiene `email`. Si no tiene correo, la respuesta sigue siendo `200` y no llega nada: el camino es un super admin (`PUT /api/v1/user/users/{id}/password`). Un admin ya no puede cambiar la clave de otro.
-
-### 2. Guardar la contraseña nueva
-
-`POST /api/v1/auth/recuperar/confirmar`
-
-```json
-{
-  "identifier": "juan.supervisor",
-  "code": "048213",
-  "newPassword": "clave-nueva-segura"
-}
-```
-
-| Respuesta | Qué hacer |
-|-----------|-----------|
-| `200` | «Contraseña actualizada.» Ir al login. El mismo `identifier` del paso 1 |
-| `400` | «El código no es válido o ya venció.» Tras 5 códigos malos hay que pedir otro |
-| `422` | `newPassword` mínimo 8 caracteres. `code` son 6 dígitos |
-
-Al confirmar se cierran las sesiones de ese usuario. El access token que ya tuviera vence solo, en unos minutos.
-
-El super admin también puede usar este flujo si su usuario tiene correo. Conviene cargarle un correo, o tener más de un super admin: si el único pierde la clave y no tiene correo, nadie entra a restablecerla.
 
 ---
 

@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import Field
@@ -59,5 +60,6 @@ class ObraResponse(BaseResponseSchema):
     current_stage_name: Optional[str] = None
     status: str
     cover_image_url: Optional[str] = None
+    progress_percent: Optional[Decimal] = None
     is_active: int
     created_at: Optional[datetime] = None

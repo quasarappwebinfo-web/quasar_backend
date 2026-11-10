@@ -203,6 +203,7 @@ async def photo_gallery(
         description="task = solo actividades; obra = fotos sin actividad",
     ),
     page: int = Query(1, ge=1),
+    page_size: int = Query(20, alias="pageSize", ge=1, le=60),
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
 ):
@@ -218,6 +219,7 @@ async def photo_gallery(
             task_id=task_id,
             kind=kind,
             page=page,
+            limit=page_size,
         )
         return {
             "photos": [

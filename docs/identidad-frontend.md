@@ -39,11 +39,10 @@ Paginación estándar (15 ítems/página):
 Reglas de UI:
 
 1. Si `hasFullAccess` → **no** mostrar checklist de permisos (admin/super no usan matriz).
-2. Si el usuario editado es super admin → deshabilitar editar / desactivar / restablecer contraseña / cambiar rol.
-3. Si el usuario editado es admin y el actor **no** es super → no permitir editar ni desactivar.
-4. **Restablecer contraseña** solo si el actor es super admin y el usuario editado no lo es. Un admin no ve ese botón: `403` si lo intenta.
-5. Select de roles al crear: **no** ofrecer `super_admin` (el API ya lo filtra en `/user/roles/active`).
-6. Tras login / `GET /auth/me`, guarda `permissions` + `hasFullAccess` para ocultar menús.
+2. Si el usuario editado es super admin → deshabilitar editar / desactivar / reset password / cambiar rol.
+3. Si el usuario editado es admin y el actor **no** es super → no permitir editar/desactivar/password.
+4. Select de roles al crear: **no** ofrecer `super_admin` (el API ya lo filtra en `/user/roles/active`).
+5. Tras login / `GET /auth/me`, guarda `permissions` + `hasFullAccess` para ocultar menús.
 
 Login y `/me` ahora incluyen:
 
@@ -223,9 +222,8 @@ Omitir `permissions` = no tocar. `permissions: []` = quitar todos. Pasar a `admi
 
 ### Password
 
-- `PUT /api/v1/user/users/{id}/password` `{ "newPassword": "…" }` — **solo super admin**. No pide la clave actual. No aplica a otro super admin (`403`). Cierra las sesiones de ese usuario.
-- `PUT /api/v1/user/me/password` con `currentPassword`. Cualquier usuario autenticado, incluido el super admin. Al guardar, sus sesiones quedan cerradas: vuelve a la pantalla de login.
-- Quien olvidó la clave y tiene correo usa la recuperación pública. Ver [auth-frontend.md](./auth-frontend.md). El correo del usuario (`email`) es el destino del código; conviene que sea único.
+- `PUT /api/v1/user/users/{id}/password` `{ "newPassword": "…" }` (admin/super; no toca super)
+- `PUT /api/v1/user/me/password` con `currentPassword`
 
 ---
 
@@ -236,7 +234,6 @@ Omitir `permissions` = no tocar. `permissions: []` = quitar todos. Pasar a `admi
 | Catálogo permisos | GET | `/api/v1/user/permissions/catalog` | identidad |
 | Personas / roles | … | `/api/v1/identidad/…` | identidad |
 | Usuarios | … | `/api/v1/user/users…` | identidad |
-| Password de otro | PUT | `/api/v1/user/users/{id}/password` | super admin |
 | Password propia | PUT | `/api/v1/user/me/password` | autenticado |
 
 ---
@@ -248,7 +245,6 @@ Omitir `permissions` = no tocar. `permissions: []` = quitar todos. Pasar a `admi
 - [ ] Checklist de permisos solo si el target **no** tiene full access
 - [ ] Bloquear acciones sobre super admin; admins solo editables por super
 - [ ] Modal desactivar con motivo
-- [ ] Restablecer contraseña solo para super admin, oculto si el usuario editado es super
-- [ ] Cambiar mi contraseña y, al éxito, cerrar sesión local y volver al login
+- [ ] Reset password + cambiar mi contraseña
 
 Catálogos: [catalogos-frontend.md](./catalogos-frontend.md).
