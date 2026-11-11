@@ -80,7 +80,7 @@ La zona tiene un `%` de la obra, configurable en el listado de zonas. El capítu
 | `progressPercent` | **% global obra ejecutada.** Suma, por cada zona activa, `weightPercent / 100 × avance de la zona`. El avance de la zona suma `peso del capítulo / 100 × avance de ese capítulo en esa zona`. Una zona o un capítulo sin `%` aporta 0. No se renormaliza |
 | `period.progressPercent` | **% cumplimiento bitácora actual.** Promedio simple de las actividades de ese periodo. No es un pedazo de la casa |
 | `activityStatus` | Conteos del periodo: `completed` (completadas + verificadas), `inProgress`, `pending` (programadas + reprogramadas). Si no hay periodo, cuenta toda la obra |
-| `zones[]` | Una fila por zona activa. `weightPercent` es su `%` de la obra (puede venir `null`). `progressPercent` es el avance de esa zona. `chapters[]` trae todos los capítulos activos medidos solo con las actividades de esa zona |
+| `zones[]` | Una fila por zona activa. `weightPercent` es su `%` de la obra (puede venir `null`). `progressPercent` es el avance de esa zona. `chapters[]` trae todos los capítulos activos, medidos con las actividades de esa zona y con las actividades generales que no tienen zona |
 | `chapters[].chapterName` | Nombre del capítulo |
 | `chapters[].weightPercent` | `%` de la casa. Puede venir `null` |
 | `chapters[].progressPercent` | Cómo va ese capítulo en la obra |

@@ -32,7 +32,7 @@ El `%` del capítulo se aplica dentro de cada zona. El `%` de la obra lo tiene l
 
 La actividad conserva la zona. El capítulo y el subcapítulo no. Ver [zonas-peso-obra.md](./zonas-peso-obra.md).
 
-El capítulo ya no elige si vale en todas las zonas. `isGlobal` sigue en el API y se ignora: cada capítulo se mide dentro de cada zona con las actividades de esa zona.
+El capítulo ya no elige si vale en todas las zonas. `isGlobal` sigue en el API y se ignora: cada capítulo se mide dentro de cada zona con las actividades de esa zona. Una actividad general sin zona entra en todas.
 
 Cambios a una versión **published**: no se edita. Se crea una **nueva versión** (opcionalmente clonando con `copyFromVersionId`).
 
@@ -234,7 +234,7 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
 | `budgetActivityId` | **Obligatorio** | Opcional | Subcapítulo activo, y del mismo `chapterId` |
 | `name` | **Obligatorio** | Opcional | 1–255 caracteres |
 | `code` | Lo genera el backend | No se puede cambiar | Si no se envía, queda `ACT-` + 12 hex en mayúsculas. La app no lo muestra |
-| `zoneId` | Opcional | Opcional | Zona de la actividad. Al cambiarla, las actividades de obra que salieron de esta pasan a esa zona en los tableros y en el cumplimiento. Se puede dejar vacía |
+| `zoneId` | Opcional | Opcional | Zona de la actividad. Vacío: el avance suma en todas las zonas. Al asignar una, las actividades de obra que salieron de esta quedan solo en esa zona |
 | `description` | Opcional | Opcional | Texto libre |
 | `isFixed` | Opcional, default `0` | Opcional | `1` fija, `0` no. Si se omite al crear, queda en `0`. Otro valor → `400` |
 | `budgetWeightPercent` | No se envía | No se envía | El backend lo reparte entre las plantillas activas del mismo subcapítulo. No es el peso de la casa y la app no lo muestra |

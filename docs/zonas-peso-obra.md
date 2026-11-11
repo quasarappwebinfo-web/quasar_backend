@@ -4,7 +4,7 @@ Implementado. El `%` de cada zona se escribe en **Listado General Act. → Zonas
 
 ## Qué pidió el cliente
 
-El capítulo y el subcapítulo no tienen zona. La zona la tiene solo la actividad. El avance de esa actividad suma únicamente en su zona.
+El capítulo y el subcapítulo no tienen zona. La zona la tiene solo la actividad. Si la actividad tiene zona, su avance suma únicamente ahí. Si es una actividad general y se deja sin zona, ese mismo avance entra en todas las zonas.
 
 La zona sí tiene un porcentaje de la obra. En el ejemplo del cliente:
 
@@ -20,7 +20,7 @@ El capítulo conserva su porcentaje, pero ese porcentaje se aplica **dentro de c
 
 ```
 avance del capítulo en esa zona
-    = promedio de las actividades de ese capítulo cuya zona es esa
+    = promedio de las actividades de ese capítulo que son de esa zona o que no tienen zona
 
 avance de la zona
     = Σ (peso del capítulo / 100 × avance del capítulo en esa zona)
@@ -47,9 +47,9 @@ Si Estructura va al 100 % en las dos zonas, suma 21 + 9 = **30 puntos**. El 30 %
 
 No se promedian las actividades de las dos zonas como si valieran lo mismo. Una actividad al 100 % en la Casa y otra al 0 % en la Zona social no son 50 %. El capítulo, mirado en la obra, va al 70 % (100 × 0,70 + 0 × 0,30) y aporta 21 puntos, no 15.
 
-Dentro de una zona, las actividades del capítulo siguen repartiéndose ese capítulo en partes iguales, solo entre las de esa zona. Una actividad de la Casa no diluye el avance de Estructura en la Zona social.
+Dentro de una zona, las actividades del capítulo se reparten ese capítulo en partes iguales. Entran las de esa zona y las actividades generales que no tienen zona: esas últimas se cuentan otra vez en cada zona. Una actividad de la Casa no diluye el avance de Estructura en la Zona social.
 
-Una actividad sin zona no suma en ninguna zona.
+Una actividad general sin zona suma su avance en todas las zonas. Una actividad creada solo en la obra, sin zona, no suma en ninguna.
 
 Un capítulo sin `%` aporta 0 en todas las zonas. Una zona sin `%` aporta 0 a la obra. No se renormaliza: si los pesos no suman 100, el anillo no tiene por qué llegar a 100.
 
@@ -57,10 +57,10 @@ Un capítulo sin `%` aporta 0 en todas las zonas. Una zona sin `%` aporta 0 a la
 
 | Dónde | Hoy | Queda |
 |---|---|---|
-| Capítulo `task_chapters` | No tiene `zone_id`. `is_global` decide si el mismo avance se copia en todas las zonas | Sin zona y sin `is_global`. El mismo peso se mide aparte en cada zona, con las actividades de esa zona |
+| Capítulo `task_chapters` | No tiene `zone_id`. `is_global` decide si el mismo avance se copia en todas las zonas | Sin zona y sin `is_global`. El mismo peso se mide aparte en cada zona, con las actividades de esa zona y las generales que no tienen zona |
 | Subcapítulo `task_budget_activities` | Tiene `zone_id`, `chapter_weight_percent` y `zone_weight_percent` | Sin zona y sin esos pesos. Sigue siendo solo el grupo dentro del capítulo |
-| Actividad del listado `task_templates` | Tiene `zone_id` | La conserva. Es la zona de la actividad |
-| Actividad de la obra `tasks` | Tiene `zone_id` | Si salió de una actividad general, la zona que suma es la de esa actividad ahora. Una actividad creada solo en la obra conserva la zona con la que nació |
+| Actividad del listado `task_templates` | Tiene `zone_id` | La conserva. Si queda vacía, su avance entra en todas las zonas |
+| Actividad de la obra `tasks` | Tiene `zone_id` | Si salió de una actividad general, suma en la zona de esa actividad ahora. Si esa actividad no tiene zona, suma en todas. Una actividad creada solo en la obra, sin zona, no suma |
 
 El peso vive en la zona de catálogo, `task_zones.weight_percent`, y se edita en el listado de zonas. Es el mismo para todas las obras.
 
@@ -69,7 +69,7 @@ El peso vive en la zona de catálogo, `task_zones.weight_percent`, y se edita en
 `GET /api/v1/operacion/tareas/cumplimiento?obraId=`
 
 - `progressPercent`: el avance de la obra con la fórmula de arriba. Hoy es `peso del capítulo × avance del capítulo`, sin mirar la zona (`_house_progress`).
-- `zones[]`: una fila por zona activa. Cada fila trae su `weightPercent`, su avance de zona y **todos** los capítulos activos. El `%` de un capítulo en esa fila sale solo de las actividades de esa zona. Hoy `_zone_board` no tiene peso de zona, y un capítulo `is_global = 1` repite el mismo avance en todas.
+- `zones[]`: una fila por zona activa. Cada fila trae su `weightPercent`, su avance de zona y **todos** los capítulos activos. El `%` de un capítulo en esa fila sale de las actividades de esa zona y de las actividades generales que no tienen zona.
 - `chapters[]`: si se sigue mostrando un capítulo suelto, su avance es el de ese capítulo dentro de cada zona, ponderado por el peso de la zona. No es el promedio de todas sus actividades juntas.
 
 El anillo de la bitácora no cambia: sigue siendo el promedio simple de las actividades de ese periodo.
