@@ -16,7 +16,7 @@ class TaskChapterCreate(BaseCreateSchema):
         None,
         ge=0,
         le=100,
-        description="% de cumplimiento: cuánto aporta este capítulo al avance de la obra",
+        description="% de este capítulo dentro de cada zona, no sobre la obra entera",
     )
     is_global: int = Field(
         0,

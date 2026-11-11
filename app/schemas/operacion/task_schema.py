@@ -257,6 +257,8 @@ class ZoneChapterProgress(BaseSchema):
 class ZoneFulfillment(BaseSchema):
     zone_id: int
     zone_name: str
+    weight_percent: Optional[Decimal] = None
+    progress_percent: Decimal = Decimal("0")
     chapters: List[ZoneChapterProgress] = Field(default_factory=list)
 
 

@@ -5,7 +5,7 @@
 Este documento es el diseño original. La aplicación que está en uso hoy se apartó de varios puntos. Si hay conflicto, manda lo que dice cada guía de frontend:
 
 - El menú es Inicio, Personal, RRHH, Obras, Bitácoras obras, Galerías obras, Reportes obras y Listado General Act. No hay pantalla de Configuración global. `/dashboard/maestros/*` redirige al inicio.
-- El avance de una obra no es el promedio de lo programado ni un stepper de etapas. Cada capítulo tiene un `%` fijo de la casa. Dentro de la obra, las actividades de ese capítulo se reparten ese `%` en partes iguales. El anillo **% global obra ejecutada** suma `capítulo × avance del capítulo`. Un capítulo sin `%` aporta 0. El anillo **% cumplimiento bitácora actual** es solo el periodo de la bitácora.
+- El avance de una obra no es el promedio de lo programado ni un stepper de etapas. Cada zona tiene un `%` configurable de la obra y cada capítulo tiene un `%` dentro de cada zona. El anillo suma `peso de la zona × avance de la zona`. Una zona o un capítulo sin `%` aporta 0. El detalle está en [zonas-peso-obra.md](./zonas-peso-obra.md). El anillo **% cumplimiento bitácora actual** es solo el periodo de la bitácora.
 - **Progreso de la construcción** lista, en cada zona, todos los capítulos activos. El `%` va dentro del círculo: verde al 100 %, naranja si ya avanzó, gris en 0. Un capítulo con alcance «En todas las zonas» (`isGlobal: 1`) repite el mismo avance en cada zona.
 - En la interfaz, la actividad presupuestal se llama **subcapítulo**. No se pide código ni orden. Una actividad registrada nueva recibe un código interno `ACT-…` que no se muestra.
 - Los documentos de la obra se suben a S3 (hasta 10 archivos, 25 MB cada uno). No se pide tipo ni un enlace. Las imágenes se comprimen.

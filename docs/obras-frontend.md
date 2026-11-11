@@ -43,9 +43,9 @@ Carpeta feature: `src/obras/`. El listado general de actividades vive en `src/ta
 
 | Señal en la ficha | Cómo se calcula |
 |--------|---------------------|
-| **% global obra ejecutada** | Suma de `weightPercent` del capítulo × avance de ese capítulo, sobre todos los capítulos activos. Un capítulo sin `%` aporta 0. No se promedian solo las actividades programadas |
+| **% global obra ejecutada** | Suma de `peso de la zona × avance de la zona`. El avance de la zona suma `peso del capítulo × avance de ese capítulo en esa zona`. Una zona o un capítulo sin `%` aporta 0 |
 | **% cumplimiento bitácora actual** | Promedio simple de las actividades del periodo de la bitácora. No es un pedazo de la casa |
-| **Progreso de la construcción** | Una fila por zona activa. En cada fila salen **todos** los capítulos activos, alineados a la izquierda. El `%` va dentro del círculo: verde si es ≥ 100, naranja si es mayor que 0 y menor que 100, gris si es 0. No hay textos «Terminado / En progreso / Siguiente». Un capítulo `isGlobal: 1` usa el promedio de sus actividades en todas las zonas; el resto solo las de esa zona (si no hay, 0) |
+| **Progreso de la construcción** | Una fila por zona activa, con su `%` de la obra. En cada fila salen todos los capítulos activos, medidos solo con las actividades de esa zona |
 | Personal en sitio | Conteos desde `GET /rrhh/asignaciones?currentOnly=true` |
 
 ---
