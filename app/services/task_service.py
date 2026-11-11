@@ -988,18 +988,30 @@ def _apply_chapter_openings(
     return {"chapters": rows, "parts": parts}
 
 
+def _counts_in_zone(task: Task, chapter_id: int, zone_id: int) -> bool:
+    """La actividad entra en esta zona.
+
+    Si tiene zona, solo entra en esa. Si salió de una actividad general y
+    esa actividad no tiene zona, entra en todas.
+    """
+    chapter, _activity, zone = _task_placement(task)
+    if chapter is None or chapter.id != chapter_id:
+        return False
+    if zone is not None:
+        return zone.id == zone_id
+    return _catalog_template(task) is not None
+
+
 def _chapter_in_zone(
     tasks: List[Task],
     chapter_id: int,
     zone_id: int,
     opening,
 ) -> Decimal:
-    """Avance del capítulo solo con las actividades de esa zona."""
-    matched = []
-    for task in tasks:
-        chapter, _activity, zone = _task_placement(task)
-        if chapter and zone and chapter.id == chapter_id and zone.id == zone_id:
-            matched.append(task)
+    """Avance del capítulo con las actividades de esa zona y las que valen en todas."""
+    matched = [
+        task for task in tasks if _counts_in_zone(task, chapter_id, zone_id)
+    ]
     return _blend_opening(_average_progress(matched), opening)
 
 
@@ -1960,7 +1972,7 @@ async def delete_task(db: Session, task_id: int, *, removed_by: int) -> None:
                 f"«{row.name}». "
                 f"Capítulo: {chapter.name if chapter else 'Sin capítulo'}. "
                 f"Subcapítulo: {activity.name if activity else 'Sin subcapítulo'}. "
-                f"Zona: {zone.name if zone else 'Sin zona'}."
+                f"Zona: {zone.name if zone else ('Todas las zonas' if _catalog_template(row) else 'Sin zona')}."
             ),
             changed_by=removed_by,
             changed_at=datetime.utcnow(),
