@@ -2,7 +2,7 @@
 
 Guía práctica de **qué construir y en qué orden** en Quasar Backend (y qué implica el front/offline).
 
-La lista de abajo es el historial de construcción. Lo que la app hace hoy está en las guías de frontend, sobre todo [obras-frontend.md](./obras-frontend.md), [task-pool-frontend.md](./task-pool-frontend.md), [tareas-frontend.md](./tareas-frontend.md) y [planificacion-frontend.md](./planificacion-frontend.md). En corto: no hay pantalla de configuración global, el progreso de la obra es por capítulos y zonas, los documentos de la obra van a S3, y las firmas de planificación no se usan (el acuse de llegada sí).
+La lista de abajo es el historial de construcción. Lo que la app hace hoy está en las guías de frontend, sobre todo [obras-frontend.md](./obras-frontend.md), [task-pool-frontend.md](./task-pool-frontend.md), [tareas-frontend.md](./tareas-frontend.md) y [planificacion-frontend.md](./planificacion-frontend.md). En corto: no hay pantalla de configuración global, el progreso de la obra pondera el `%` configurable de cada zona, los documentos de la obra van a S3, y las firmas de planificación no se usan (el acuse de llegada sí). El reparto está en [zonas-peso-obra.md](./zonas-peso-obra.md).
 
 Ya tienes: base Docker/MySQL, auth JWT + refresh cookie, modelos/schemas por dominio, script del primer admin.
 

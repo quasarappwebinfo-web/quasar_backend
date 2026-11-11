@@ -780,13 +780,19 @@ def _percent_share(part: int, total: int) -> Decimal:
 
 
 def _task_placement(task: Task):
-    """Capítulo, presupuestal y zona guardados en la tarea, o los de su plantilla."""
+    """Capítulo y subcapítulo de la tarea.
+
+    Si salió de una actividad general, la zona es la de esa actividad ahora,
+    no la que tenía el día en que se copió a la obra.
+    """
+    template = _catalog_template(task)
+    if template is not None:
+        chapter = task.chapter or template.chapter
+        activity = task.budget_activity or template.budget_activity
+        return chapter, activity, template.zone
     if task.chapter_id or task.budget_activity_id or task.zone_id:
         return task.chapter, task.budget_activity, task.zone
-    template = _catalog_template(task)
-    if not template:
-        return None, None, None
-    return template.chapter, template.budget_activity, template.zone
+    return None, None, None
 
 
 def _bind_placement(
@@ -982,6 +988,70 @@ def _apply_chapter_openings(
     return {"chapters": rows, "parts": parts}
 
 
+def _chapter_in_zone(
+    tasks: List[Task],
+    chapter_id: int,
+    zone_id: int,
+    opening,
+) -> Decimal:
+    """Avance del capítulo solo con las actividades de esa zona."""
+    matched = []
+    for task in tasks:
+        chapter, _activity, zone = _task_placement(task)
+        if chapter and zone and chapter.id == chapter_id and zone.id == zone_id:
+            matched.append(task)
+    return _blend_opening(_average_progress(matched), opening)
+
+
+def _zone_score(
+    tasks: List[Task],
+    catalog_chapters: List[TaskChapter],
+    zone: TaskZone,
+    openings: Dict[int, Any],
+) -> Decimal:
+    """El capítulo pesa dentro de la zona. Estructura al 30 % es el 30 % de esta zona."""
+    total = Decimal("0")
+    for chapter in catalog_chapters:
+        weight = Decimal(str(chapter.weight_percent or 0))
+        progress = _chapter_in_zone(
+            tasks, chapter.id, zone.id, openings.get(chapter.id)
+        )
+        total += weight * progress / Decimal(100)
+    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _obra_score(
+    tasks: List[Task],
+    catalog_chapters: List[TaskChapter],
+    catalog_zones: List[TaskZone],
+    openings: Dict[int, Any],
+) -> Decimal:
+    """La zona pesa sobre la obra. Casa al 70 % aporta el 70 % de su propio avance."""
+    total = Decimal("0")
+    for zone in catalog_zones:
+        weight = Decimal(str(zone.weight_percent or 0))
+        score = _zone_score(tasks, catalog_chapters, zone, openings)
+        total += weight * score / Decimal(100)
+    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _chapter_across_zones(
+    tasks: List[Task],
+    chapter: TaskChapter,
+    catalog_zones: List[TaskZone],
+    openings: Dict[int, Any],
+) -> Decimal:
+    """Cómo va el capítulo en la obra: cada zona aporta según su peso."""
+    total = Decimal("0")
+    for zone in catalog_zones:
+        weight = Decimal(str(zone.weight_percent or 0))
+        progress = _chapter_in_zone(
+            tasks, chapter.id, zone.id, openings.get(chapter.id)
+        )
+        total += weight * progress / Decimal(100)
+    return total.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
 def house_progress_by_obra(
     db: Session, obra_ids: List[int]
 ) -> Dict[int, Decimal]:
@@ -997,12 +1067,14 @@ def house_progress_by_obra(
             joinedload(Task.zone),
             joinedload(Task.source_template).options(
                 joinedload(TaskTemplate.chapter),
+                joinedload(TaskTemplate.zone),
                 joinedload(TaskTemplate.budget_activity),
             ),
             joinedload(Task.source_template_version)
             .joinedload(TaskTemplateVersion.task_template)
             .options(
                 joinedload(TaskTemplate.chapter),
+                joinedload(TaskTemplate.zone),
                 joinedload(TaskTemplate.budget_activity),
             ),
         )
@@ -1015,41 +1087,18 @@ def house_progress_by_obra(
     catalog_chapters = (
         db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
     )
+    catalog_zones = db.query(TaskZone).filter(TaskZone.is_active == 1).all()
     openings = _openings_by_obra(db, obra_ids)
     progress: Dict[int, Decimal] = {}
     for obra_id in obra_ids:
         rows = list(by_obra.get(obra_id, {}).values())
-        built = _apply_chapter_openings(
-            _chapters_from_tasks(rows),
-            openings.get(obra_id, {}),
+        progress[obra_id] = _obra_score(
+            rows,
             catalog_chapters,
+            catalog_zones,
+            openings.get(obra_id, {}),
         )
-        progress[obra_id] = _house_progress(built["parts"], catalog_chapters)
     return progress
-
-
-def _house_progress(
-    parts: List[Tuple[Optional[int], Optional[Decimal], Decimal]],
-    catalog_chapters: List[TaskChapter],
-) -> Decimal:
-    """Suma el aporte real de cada capítulo a la casa. 1% al 80% son 0,80 puntos."""
-    progress_by_id = {
-        chapter_id: progress
-        for chapter_id, _weight, progress in parts
-        if chapter_id is not None
-    }
-    total = Decimal("0")
-    seen = set()
-    for chapter in catalog_chapters:
-        seen.add(chapter.id)
-        weight = Decimal(str(chapter.weight_percent or 0))
-        progress = progress_by_id.get(chapter.id, Decimal("0"))
-        total += weight * progress / Decimal(100)
-    for chapter_id, weight, progress in parts:
-        if chapter_id is None or chapter_id in seen:
-            continue
-        total += Decimal(str(weight or 0)) * progress / Decimal(100)
-    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _average_progress(tasks: List[Task]) -> Decimal:
@@ -1067,18 +1116,8 @@ def _zone_board(
     catalog_zones: List[TaskZone],
     openings: Optional[Dict[int, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Cada zona lista todos los capítulos. El global repite el mismo avance."""
-    by_chapter: Dict[int, List[Task]] = {}
-    by_chapter_zone: Dict[Tuple[int, int], List[Task]] = {}
-    for task in tasks:
-        chapter, _activity, zone = _task_placement(task)
-        if not chapter:
-            continue
-        by_chapter.setdefault(chapter.id, []).append(task)
-        if zone:
-            by_chapter_zone.setdefault((chapter.id, zone.id), []).append(task)
-
-    chapters = sorted(
+    """Cada zona mide sus propias actividades. El peso de la zona sale del catálogo."""
+    chapter_rows = sorted(
         catalog_chapters,
         key=lambda row: (row.display_order or 0, row.name or ""),
     )
@@ -1086,31 +1125,29 @@ def _zone_board(
         catalog_zones,
         key=lambda row: (row.display_order or 0, row.name or ""),
     )
+    marks = openings or {}
     board = []
     for zone in zones:
         rows = []
-        for chapter in chapters:
-            if chapter.is_global == 1:
-                measured = _average_progress(by_chapter.get(chapter.id, []))
-            else:
-                measured = _average_progress(
-                    by_chapter_zone.get((chapter.id, zone.id), [])
-                )
-            progress = _blend_opening(
-                measured, (openings or {}).get(chapter.id)
-            )
+        for chapter in chapter_rows:
             rows.append(
                 {
                     "chapter_id": chapter.id,
                     "chapter_name": chapter.name,
-                    "progress_percent": progress,
-                    "is_global": 1 if chapter.is_global == 1 else 0,
+                    "progress_percent": _chapter_in_zone(
+                        tasks, chapter.id, zone.id, marks.get(chapter.id)
+                    ),
+                    "is_global": 0,
                 }
             )
         board.append(
             {
                 "zone_id": zone.id,
                 "zone_name": zone.name,
+                "weight_percent": zone.weight_percent,
+                "progress_percent": _zone_score(
+                    tasks, chapter_rows, zone, marks
+                ),
                 "chapters": rows,
             }
         )
@@ -1181,12 +1218,14 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
             joinedload(Task.zone),
             joinedload(Task.source_template).options(
                 joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
+                joinedload(TaskTemplate.zone),
                 joinedload(TaskTemplate.budget_activity),
             ),
             joinedload(Task.source_template_version)
             .joinedload(TaskTemplateVersion.task_template)
             .options(
                 joinedload(TaskTemplate.chapter).joinedload(TaskChapter.stage),
+                joinedload(TaskTemplate.zone),
                 joinedload(TaskTemplate.budget_activity),
             ),
         )
@@ -1208,6 +1247,18 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
     openings = _openings_by_obra(db, [obra_id]).get(obra_id, {})
     built = _apply_chapter_openings(built, openings, catalog_chapters)
     catalog_zones = db.query(TaskZone).filter(TaskZone.is_active == 1).all()
+    for row in built["chapters"]:
+        chapter_id = row["chapter_id"]
+        chapter = next(
+            (item for item in catalog_chapters if item.id == chapter_id),
+            None,
+        )
+        if chapter is None:
+            row["progress_percent"] = Decimal("0")
+            continue
+        row["progress_percent"] = _chapter_across_zones(
+            tasks, chapter, catalog_zones, openings
+        )
     plan = _period_plan(db, obra_id)
     period = None
     status_tasks = tasks
@@ -1230,7 +1281,9 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
 
     return {
         "obra_id": obra_id,
-        "progress_percent": _house_progress(built["parts"], catalog_chapters),
+        "progress_percent": _obra_score(
+            tasks, catalog_chapters, catalog_zones, openings
+        ),
         "chapters": built["chapters"],
         "zones": _zone_board(tasks, catalog_chapters, catalog_zones, openings),
         "period": period,

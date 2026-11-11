@@ -17,6 +17,7 @@ from app.models import (
     MeasurementUnit,
     ObraStage,
     Specialty,
+    Task,
     TaskBudgetActivity,
     TaskChapter,
     TaskTemplate,
@@ -104,6 +105,7 @@ def zone_to_dict(row: TaskZone) -> Dict[str, Any]:
         "name": row.name,
         "description": row.description,
         "display_order": row.display_order,
+        "weight_percent": row.weight_percent,
         "is_active": row.is_active,
         "created_at": row.created_at,
     }
@@ -141,6 +143,7 @@ def template_to_dict(row: TaskTemplate) -> Dict[str, Any]:
         "code": row.code,
         "description": row.description,
         "budget_weight_percent": row.budget_weight_percent,
+        "is_fixed": row.is_fixed,
         "is_active": row.is_active,
         "created_at": row.created_at,
     }
@@ -349,6 +352,7 @@ async def create_zone(db: Session, data: TaskZoneCreate) -> TaskZone:
         name=data.name,
         description=data.description,
         display_order=data.display_order,
+        weight_percent=data.weight_percent,
         is_active=1,
     )
     db.add(row)
@@ -593,6 +597,26 @@ def _share_budget_weights(db: Session, budget_activity_id: Optional[int]) -> Non
         row.budget_weight_percent = share if row.is_active == 1 else Decimal("0")
 
 
+def _copy_template_zone_to_obra_tasks(
+    db: Session, template_id: int, zone_id: Optional[int]
+) -> None:
+    """La zona de la actividad general manda en las obras que ya la copiaron."""
+    version_ids = [
+        row[0]
+        for row in db.query(TaskTemplateVersion.id)
+        .filter(TaskTemplateVersion.task_template_id == template_id)
+        .all()
+    ]
+    linked = [Task.source_template_id == template_id]
+    if version_ids:
+        linked.append(Task.source_template_version_id.in_(version_ids))
+    (
+        db.query(Task)
+        .filter(or_(*linked))
+        .update({Task.zone_id: zone_id}, synchronize_session=False)
+    )
+
+
 # ---------- Plantillas ----------
 
 
@@ -619,6 +643,8 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         raise TaskPoolValidationError(
             "El subcapítulo no pertenece al capítulo seleccionado"
         )
+    if data.is_fixed not in (0, 1):
+        raise TaskPoolValidationError("is_fixed debe ser 0 o 1")
     code = f"ACT-{uuid.uuid4().hex[:12].upper()}"
     row = TaskTemplate(
         chapter_id=data.chapter_id,
@@ -627,6 +653,7 @@ async def create_template(db: Session, data: TaskTemplateCreate) -> TaskTemplate
         name=data.name,
         code=code,
         description=data.description,
+        is_fixed=data.is_fixed,
         is_active=1,
     )
     db.add(row)
@@ -722,6 +749,8 @@ async def update_template(
     previous_activity_id = row.budget_activity_id
     if "is_active" in payload and payload["is_active"] not in (1, 2):
         raise TaskPoolValidationError("is_active debe ser 1 o 2")
+    if "is_fixed" in payload and payload["is_fixed"] not in (0, 1):
+        raise TaskPoolValidationError("is_fixed debe ser 0 o 1")
     if "chapter_id" in payload:
         cat = (
             db.query(TaskChapter)
@@ -766,6 +795,8 @@ async def update_template(
             )
     for k, v in payload.items():
         setattr(row, k, v)
+    if "zone_id" in payload:
+        _copy_template_zone_to_obra_tasks(db, row.id, row.zone_id)
     db.flush()
     _share_budget_weights(db, row.budget_activity_id)
     if previous_activity_id != row.budget_activity_id:

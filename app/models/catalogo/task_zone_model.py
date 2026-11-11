@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -14,6 +14,8 @@ class TaskZone(Base):
     name = Column(String(150), nullable=False)
     description = Column(Text, nullable=True)
     display_order = Column(Integer, nullable=False)
+    # % de esta zona sobre la obra. Lo define el catálogo, no es fijo.
+    weight_percent = Column(Numeric(6, 2), nullable=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())

@@ -69,16 +69,18 @@ Ruta sugerida: `/tareas` o `/obras/:obraId/tareas`.
 
 ### Cumplimiento de la obra
 
+La zona tiene un `%` de la obra, configurable en el listado de zonas. El capítulo tiene un `%` dentro de cada zona. El detalle y el ejemplo de Casa 70 / Zona social 30 / Estructura 30 está en [zonas-peso-obra.md](./zonas-peso-obra.md).
+
 `GET /api/v1/operacion/tareas/cumplimiento?obraId=`
 
 `obraId` es el único query y es **obligatorio**. No hay body.
 
 | Campo de la respuesta | Qué pintar |
 |-----------------------|------------|
-| `progressPercent` | **% global obra ejecutada.** Suma, sobre todos los capítulos activos, `weightPercent / 100 × avance del capítulo`. Un capítulo sin actividades o sin `%` aporta 0. No se renormaliza con la suma de los `%` que sí tienen actividades |
+| `progressPercent` | **% global obra ejecutada.** Suma, por cada zona activa, `weightPercent / 100 × avance de la zona`. El avance de la zona suma `peso del capítulo / 100 × avance de ese capítulo en esa zona`. Una zona o un capítulo sin `%` aporta 0. No se renormaliza |
 | `period.progressPercent` | **% cumplimiento bitácora actual.** Promedio simple de las actividades de ese periodo. No es un pedazo de la casa |
 | `activityStatus` | Conteos del periodo: `completed` (completadas + verificadas), `inProgress`, `pending` (programadas + reprogramadas). Si no hay periodo, cuenta toda la obra |
-| `zones[]` | Una fila por zona activa. `chapters[]` trae **todos** los capítulos activos con su `progressPercent`. El global (`isGlobal: 1`) promedia sus actividades en todas las zonas; el resto, solo las de esa zona |
+| `zones[]` | Una fila por zona activa. `weightPercent` es su `%` de la obra (puede venir `null`). `progressPercent` es el avance de esa zona. `chapters[]` trae todos los capítulos activos medidos solo con las actividades de esa zona |
 | `chapters[].chapterName` | Nombre del capítulo |
 | `chapters[].weightPercent` | `%` de la casa. Puede venir `null` |
 | `chapters[].progressPercent` | Cómo va ese capítulo en la obra |

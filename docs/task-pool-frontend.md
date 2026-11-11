@@ -28,9 +28,11 @@ Capítulo (% de la casa) → Subcapítulo → Actividad registrada
     → en esa obra, las actividades del capítulo se reparten el % del capítulo en partes iguales
 ```
 
-El `%` que manda es el del **capítulo sobre la obra**. El subcapítulo no tiene un `%` propio en el listado. `budgetWeightPercent` de la plantilla se sigue calculando, pero la interfaz no lo muestra como peso de la casa. Al agregar actividades a una obra, el reparto de ese capítulo se vuelve a equilibrar entre las actividades que están en la obra, no entre las del catálogo.
+El `%` del capítulo se aplica dentro de cada zona. El `%` de la obra lo tiene la zona y se configura en Zonas. El subcapítulo no tiene zona ni un `%` propio. `budgetWeightPercent` de la plantilla se sigue calculando, pero la interfaz no lo muestra como peso de la casa. Dentro de una zona, las actividades del capítulo se reparten ese capítulo en partes iguales.
 
-`isGlobal: 1` en el capítulo significa «En todas las zonas»: el avance es el mismo en cada zona. `0` es «Por zona».
+La actividad conserva la zona. El capítulo y el subcapítulo no. Ver [zonas-peso-obra.md](./zonas-peso-obra.md).
+
+El capítulo ya no elige si vale en todas las zonas. `isGlobal` sigue en el API y se ignora: cada capítulo se mide dentro de cada zona con las actividades de esa zona.
 
 Cambios a una versión **published**: no se edita. Se crea una **nueva versión** (opcionalmente clonando con `copyFromVersionId`).
 
@@ -74,7 +76,7 @@ La ruta sigue siendo `/dashboard/maestros/task-pool`. Las pestañas internas no 
 
 | Pestaña | Qué pide la app |
 |---------|-----------------|
-| Capítulos | Nombre, descripción, `% de la obra` y alcance (Por zona / En todas las zonas). La etapa es opcional en el API y no se pide |
+| Capítulos | Nombre, descripción y `% de cada zona`. La etapa es opcional en el API y no se pide |
 | Subcapítulos | Capítulo y nombre. La ruta del API sigue siendo `/actividades-presupuestales` |
 | Zonas | Nombre y descripción |
 | Actividades registradas | Capítulo, subcapítulo y nombre. El código lo genera el backend (`ACT-` + 12 hex) y no se muestra |
@@ -145,8 +147,8 @@ Base: `/api/v1/catalogo/capitulos-tarea`
 | `stageId` | Opcional | Opcional | Etapa de obra. La app no la pide. Si no se envía, el capítulo queda sin etapa |
 | `description` | Opcional | Opcional | Texto libre |
 | `displayOrder` | Opcional, default `0` | Opcional | La app no lo pide. El listado ordena por nombre |
-| `weightPercent` | Opcional | Opcional | `%` de este capítulo sobre la casa, `0`–`100`. Es el único peso que usa el avance global |
-| `isGlobal` | Opcional, default `0` | Opcional | `1` = el avance vale igual en todas las zonas. `0` = se mide por zona |
+| `weightPercent` | Opcional | Opcional | `%` de este capítulo dentro de cada zona, `0`–`100` |
+| `isGlobal` | Opcional, default `0` | Opcional | Sigue en el API. El avance ya no lo usa |
 | `isActive` | No se envía (el backend guarda `1`) | Opcional | `1` activo, `2` inactivo |
 
 ### Respuesta
@@ -177,13 +179,14 @@ En la interfaz, la actividad presupuestal se llama **subcapítulo**. Las rutas y
 
 ### Zona — `/api/v1/catalogo/zonas-tarea`
 
-Ámbito de la obra (Casa, Zona social, …). No participa en el `%` de cumplimiento.
+Ámbito de la obra (Casa, Zona social, …). `weightPercent` es su `%` de la obra y entra en el avance.
 
 | Campo | Al crear | En el `PUT` | Qué es |
 |-------|----------|-------------|--------|
 | `name` | **Obligatorio** | Opcional | 1–150 caracteres |
 | `description` | Opcional | Opcional | Texto libre |
 | `displayOrder` | Opcional, default `0` | Opcional | Orden |
+| `weightPercent` | Opcional | Opcional | `%` de la obra, `0`–`100`. Vacío: la zona no suma |
 | `isActive` | No se envía | Opcional | `1` activo, `2` inactivo |
 
 ### Subcapítulo — `/api/v1/catalogo/actividades-presupuestales`
@@ -194,7 +197,7 @@ Rubro dentro de un capítulo. Ejemplo: capítulo Estructura → subcapítulo Est
 |-------|----------|-------------|--------|
 | `chapterId` | **Obligatorio** | Opcional | Capítulo al que pertenece. Tiene que existir y estar activo |
 | `name` | **Obligatorio** | Opcional | 1–150 caracteres. Único dentro del mismo capítulo |
-| `zoneId` | Opcional | Opcional | Zona. Se puede dejar vacía |
+| `zoneId` | Opcional | Opcional | La app lo envía vacío. El avance no usa la zona del subcapítulo |
 | `description` | Opcional | Opcional | Texto libre |
 | `displayOrder` | Opcional, default `0` | Opcional | Orden |
 | `chapterWeightPercent` | Opcional | Opcional | Sigue en el API. La app no lo usa como peso de la casa |
@@ -231,7 +234,7 @@ La plantilla es la identidad estable (`code`). El conocimiento vive en las **ver
 | `budgetActivityId` | **Obligatorio** | Opcional | Subcapítulo activo, y del mismo `chapterId` |
 | `name` | **Obligatorio** | Opcional | 1–255 caracteres |
 | `code` | Lo genera el backend | No se puede cambiar | Si no se envía, queda `ACT-` + 12 hex en mayúsculas. La app no lo muestra |
-| `zoneId` | Opcional | Opcional | Zona. La actividad se guarda sin zona |
+| `zoneId` | Opcional | Opcional | Zona de la actividad. Al cambiarla, las actividades de obra que salieron de esta pasan a esa zona en los tableros y en el cumplimiento. Se puede dejar vacía |
 | `description` | Opcional | Opcional | Texto libre |
 | `isFixed` | Opcional, default `0` | Opcional | `1` fija, `0` no. Si se omite al crear, queda en `0`. Otro valor → `400` |
 | `budgetWeightPercent` | No se envía | No se envía | El backend lo reparte entre las plantillas activas del mismo subcapítulo. No es el peso de la casa y la app no lo muestra |
@@ -579,7 +582,7 @@ Ejemplo: base 100 m³ / 5 días / 4 personas; obra 250 m³ → factor `2.5` → 
 
 ## Flujo feliz (checklist QA frontend)
 
-1. Crear capítulo: el nombre es obligatorio. `weightPercent` es el `%` de la casa. `isGlobal` dice si vale en todas las zonas. La etapa no se pide.
+1. Crear capítulo: el nombre es obligatorio. `weightPercent` es el `%` dentro de cada zona. La etapa no se pide.
 2. Crear subcapítulo: `chapterId` y nombre. No se le escribe un `%` de la casa.
 3. Crear actividad registrada: `chapterId`, `budgetActivityId` y `name`. El código lo pone el backend y no se muestra.
 4. Crear versión draft (cantidad y duración opcionales).
