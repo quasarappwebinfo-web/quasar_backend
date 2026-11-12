@@ -366,6 +366,38 @@ docker compose -f docker-compose.prod.yml --env-file .env exec backend alembic u
 
 **Solo migraciones** — mismo `exec backend alembic upgrade head` del entorno que tocaste. Si no hay migraciones nuevas, no hace nada.
 
+**Entrar a la base de datos.** Ya estás en el SSH del VPS. MySQL no se abre a internet: el puerto solo escucha en el propio servidor (pruebas `3309`, producción `3310`). La clave es `MYSQL_ROOT_PASSWORD` del `.env` de ese entorno. El comando la pide; no la pegues en la misma línea.
+
+Pruebas, base `quasar_staging`:
+
+```bash
+docker exec -it quasar_backend_db_staging mysql -uroot -p quasar_staging
+```
+
+Producción, base `quasar_prod`:
+
+```bash
+docker exec -it quasar_backend_db_prod mysql -uroot -p quasar_prod
+```
+
+Ahí puedes pegar un `SELECT` o un `UPDATE`. Sales con `exit`.
+
+Para una sola consulta, sin quedarte dentro:
+
+```bash
+docker exec -it quasar_backend_db_staging mysql -uroot -p quasar_staging -e "SELECT id, name, is_fixed FROM task_templates;"
+```
+
+En producción cambia el contenedor y la base: `quasar_backend_db_prod` y `quasar_prod`.
+
+Desde el Mac, con un cliente (TablePlus, DBeaver), el puerto del VPS no es visible. Abre un túnel y deja esa terminal abierta:
+
+```bash
+ssh -L 3309:127.0.0.1:3309 USUARIO@2.25.255.157
+```
+
+El cliente apunta a `127.0.0.1`, puerto `3309`, usuario `root`, la clave de pruebas y la base `quasar_staging`. Para producción el túnel es `-L 3310:127.0.0.1:3310` y el cliente usa el puerto `3310`, la clave de producción y la base `quasar_prod`.
+
 **Logs:**
 
 ```bash
