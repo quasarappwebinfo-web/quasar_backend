@@ -101,8 +101,8 @@ Crea:
 { "taskId": 15, "plannedStartDate": null, "plannedEndDate": null }
 ```
 
-`POST /versiones/{versionId}/tareas` — solo draft.  
-`DELETE /snapshots/{snapshotId}`.
+`POST /versiones/{versionId}/tareas` agrega una actividad que ya es de esa obra. No pide que tenga fechas: si sigue abierta, el periodo de la bitácora pasa a ser su inicio y su fin.  
+`DELETE /snapshots/{snapshotId}` la quita de esta bitácora.
 
 ---
 

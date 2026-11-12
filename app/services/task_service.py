@@ -922,7 +922,7 @@ def _chapters_from_tasks(tasks: List[Task]) -> Dict[str, Any]:
 
 def _blend_opening(measured: Decimal, opening) -> Decimal:
     """El porcentaje declarado es el piso. Lo que se complete después sube desde ahí."""
-    if opening is None:
+    if opening is None or opening.mode == "running":
         return measured.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     if opening.mode == "completed":
         return Decimal("100")
@@ -943,10 +943,76 @@ def _openings_by_obra(db: Session, obra_ids: List[int]) -> Dict[int, Dict[int, A
         .filter(ObraChapterOpening.obra_id.in_(obra_ids))
         .all()
     )
-    grouped: Dict[int, Dict[int, Any]] = {}
+    grouped: Dict[int, Dict[int, Dict[Optional[int], Any]]] = {}
     for row in rows:
-        grouped.setdefault(row.obra_id, {})[row.chapter_id] = row
+        grouped.setdefault(row.obra_id, {}).setdefault(row.chapter_id, {})[
+            row.zone_id
+        ] = row
     return grouped
+
+
+def _opening_for(
+    openings: Dict[int, Any], chapter_id: int, zone_id: int
+):
+    """La marca de esa zona gana. Si no hay, vale la marca del capítulo entero."""
+    by_zone = openings.get(chapter_id) or {}
+    specific = by_zone.get(zone_id)
+    if specific is not None:
+        return specific
+    return by_zone.get(None)
+
+
+def _reject_completed_chapter(
+    db: Session,
+    obra_id: int,
+    chapter_id: Optional[int],
+    zone_id: Optional[int],
+) -> None:
+    """Una zona marcada completada no recibe actividades nuevas de ese capítulo."""
+    if chapter_id is None:
+        return
+    from app.models import ObraChapterOpening
+
+    rows = (
+        db.query(ObraChapterOpening)
+        .filter(
+            ObraChapterOpening.obra_id == obra_id,
+            ObraChapterOpening.chapter_id == chapter_id,
+            ObraChapterOpening.mode == "completed",
+        )
+        .all()
+    )
+    if not rows:
+        return
+    chapter = db.query(TaskChapter).filter(TaskChapter.id == chapter_id).first()
+    chapter_name = chapter.name if chapter else f"#{chapter_id}"
+    if any(row.zone_id is None for row in rows):
+        raise TaskOpValidationError(
+            f"«{chapter_name}» está completado. No se le agregan actividades."
+        )
+    if zone_id is None:
+        names = _completed_zone_names(db, rows)
+        raise TaskOpValidationError(
+            f"«{chapter_name}» está completado en {names}. "
+            "Una actividad de todas las zonas no se agrega."
+        )
+    matched = next((row for row in rows if row.zone_id == zone_id), None)
+    if matched is None:
+        return
+    zone = db.query(TaskZone).filter(TaskZone.id == zone_id).first()
+    zone_name = zone.name if zone else f"#{zone_id}"
+    raise TaskOpValidationError(
+        f"«{chapter_name}» está completado en {zone_name}. "
+        "No se le agregan actividades."
+    )
+
+
+def _completed_zone_names(db: Session, rows) -> str:
+    names = []
+    for row in rows:
+        zone = db.query(TaskZone).filter(TaskZone.id == row.zone_id).first()
+        names.append(zone.name if zone else f"#{row.zone_id}")
+    return ", ".join(names)
 
 
 def _apply_chapter_openings(
@@ -962,15 +1028,17 @@ def _apply_chapter_openings(
     seen = set()
     for row, part in zip(built["chapters"], built["parts"]):
         chapter_id = row["chapter_id"]
-        opening = openings.get(chapter_id) if chapter_id is not None else None
+        by_zone = openings.get(chapter_id) if chapter_id is not None else None
+        opening = by_zone.get(None) if isinstance(by_zone, dict) else by_zone
         progress = _blend_opening(Decimal(str(part[2])), opening)
         rows.append({**row, "progress_percent": progress})
         parts.append((part[0], part[1], progress))
         if chapter_id is not None:
             seen.add(chapter_id)
-    for chapter_id, opening in openings.items():
+    for chapter_id, by_zone in openings.items():
         if chapter_id in seen:
             continue
+        opening = by_zone.get(None) if isinstance(by_zone, dict) else by_zone
         chapter = catalog.get(chapter_id)
         if chapter is None:
             continue
@@ -1026,7 +1094,7 @@ def _zone_score(
     for chapter in catalog_chapters:
         weight = Decimal(str(chapter.weight_percent or 0))
         progress = _chapter_in_zone(
-            tasks, chapter.id, zone.id, openings.get(chapter.id)
+            tasks, chapter.id, zone.id, _opening_for(openings, chapter.id, zone.id)
         )
         total += weight * progress / Decimal(100)
     return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -1058,7 +1126,7 @@ def _chapter_across_zones(
     for zone in catalog_zones:
         weight = Decimal(str(zone.weight_percent or 0))
         progress = _chapter_in_zone(
-            tasks, chapter.id, zone.id, openings.get(chapter.id)
+            tasks, chapter.id, zone.id, _opening_for(openings, chapter.id, zone.id)
         )
         total += weight * progress / Decimal(100)
     return total.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -1147,7 +1215,10 @@ def _zone_board(
                     "chapter_id": chapter.id,
                     "chapter_name": chapter.name,
                     "progress_percent": _chapter_in_zone(
-                        tasks, chapter.id, zone.id, marks.get(chapter.id)
+                        tasks,
+                        chapter.id,
+                        zone.id,
+                        _opening_for(marks, chapter.id, zone.id),
                     ),
                     "is_global": 0,
                 }
@@ -1548,6 +1619,7 @@ def add_task_from_catalog(
         raise TaskOpValidationError(
             f"Actividad registrada {data.template_id} no existe o está inactiva"
         )
+    _reject_completed_chapter(db, data.obra_id, tpl.chapter_id, tpl.zone_id)
 
     uid = _new_uuid(data.uuid)
     _assert_uuid_free(db, Task, uid, "Tarea")
@@ -1629,6 +1701,8 @@ def _add_task_from_published_version(
         else estimated
     )
     tpl = version.task_template
+    if tpl is not None:
+        _reject_completed_chapter(db, data.obra_id, tpl.chapter_id, tpl.zone_id)
     name = data.name or (tpl.name if tpl else version.name)
     unit_id = _primary_unit_id(db, version.id)
 
@@ -1798,6 +1872,7 @@ def add_unique_obra_task(
     cleaned = name.strip()
     if not cleaned:
         raise TaskOpValidationError("El nombre de la actividad es obligatorio.")
+    _reject_completed_chapter(db, obra_id, chapter_id, zone_id)
     uid = _new_uuid(None)
     _assert_uuid_free(db, Task, uid, "Tarea")
     task = Task(
@@ -1872,6 +1947,8 @@ async def create_task_manual(
         raise TaskOpValidationError(
             "Indica capítulo, subcapítulo y zona."
         )
+    if data.parent_task_id is None:
+        _reject_completed_chapter(db, data.obra_id, data.chapter_id, data.zone_id)
 
     task = Task(
         uuid=uid,

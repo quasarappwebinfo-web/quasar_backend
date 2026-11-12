@@ -19,6 +19,32 @@ class ObraChapterOpening(BaseSchema):
     template_ids: List[int] = Field(default_factory=list)
 
 
+class ObraChapterMark(BaseSchema):
+    """Marca de un capítulo en una zona de una obra que ya está andando."""
+
+    chapter_id: int
+    zone_id: int
+    mode: str = Field(..., max_length=20)
+    progress_percent: Optional[int] = Field(None, ge=1, le=99)
+
+
+class ObraChapterMarksUpdate(BaseSchema):
+    chapters: List[ObraChapterMark]
+
+
+class ObraChapterZoneMarkResponse(BaseSchema):
+    zone_id: int
+    zone_name: str
+    mode: str
+    progress_percent: Optional[int] = None
+
+
+class ObraChapterMarkResponse(BaseSchema):
+    chapter_id: int
+    chapter_name: str
+    zones: List[ObraChapterZoneMarkResponse]
+
+
 class ObraCreate(BaseCreateSchema):
     name: str = Field(..., min_length=1, max_length=255)
     sale_type_id: int

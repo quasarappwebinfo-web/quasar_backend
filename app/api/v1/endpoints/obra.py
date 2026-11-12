@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.core.permissions import PERMISSION_OBRAS
+from app.core.permissions import PERMISSION_OBRAS, PERMISSION_TAREAS
 from app.api.deps import get_db, require_permission
 from app.models import User
 from app.schemas import (
@@ -21,6 +21,10 @@ from app.schemas import (
     ObraStageChange,
     ObraStageHistoryResponse,
     ObraUpdate,
+)
+from app.schemas.obras.obra_schema import (
+    ObraChapterMarkResponse,
+    ObraChapterMarksUpdate,
 )
 from app.services.obra_client_document_service import (
     DocumentConflictError,
@@ -50,9 +54,11 @@ from app.services.obra_service import (
     create_obra,
     delete_obra_cover_image,
     get_obra,
+    list_obra_chapter_marks,
     list_obra_stage_history,
     list_obras,
     obra_to_dict,
+    set_obra_chapter_marks,
     set_obra_cover_image,
     update_obra,
 )
@@ -219,6 +225,59 @@ async def get_obra_endpoint(
         return ObraResponse(**obra_to_dict(obra)).model_dump(by_alias=True)
     except ObraNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{obra_id}/capitulos", summary="Marcas de capítulos de la obra")
+async def list_obra_chapters_endpoint(
+    obra_id: int,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(
+        require_permission(PERMISSION_OBRAS, PERMISSION_TAREAS)
+    ),
+):
+    _ = user_auth
+    try:
+        data = list_obra_chapter_marks(db, obra_id)
+        return {
+            "chapters": [
+                ObraChapterMarkResponse(**item).model_dump(by_alias=True)
+                for item in data["chapters"]
+            ]
+        }
+    except ObraNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.put(
+    "/{obra_id}/capitulos",
+    summary="Marcar capítulos de una obra en marcha",
+    description=(
+        "Solo super admin. La marca es por zona: un capítulo puede estar "
+        "completado en Casa y en marcha en Zona Social."
+    ),
+)
+async def set_obra_chapters_endpoint(
+    obra_id: int,
+    data: ObraChapterMarksUpdate,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_OBRAS)),
+):
+    try:
+        result = set_obra_chapter_marks(
+            db, obra_id, data.chapters, actor=user_auth
+        )
+        return {
+            "chapters": [
+                ObraChapterMarkResponse(**item).model_dump(by_alias=True)
+                for item in result["chapters"]
+            ]
+        }
+    except ObraNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ObraForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ObraValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.put(

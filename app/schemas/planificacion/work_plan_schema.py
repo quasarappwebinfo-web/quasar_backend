@@ -100,7 +100,10 @@ class WorkPlanVersionResponse(BaseResponseSchema):
 
 
 class WorkPlanTaskAdd(BaseCreateSchema):
-    """Agregar tarea al snapshot de una versión draft."""
+    """Agrega una actividad de la obra a la bitácora.
+
+    Si no se envían fechas y la actividad sigue abierta, toma las del periodo.
+    """
 
     task_id: int
     planned_start_date: Optional[date] = None
