@@ -70,6 +70,9 @@ from app.services.s3_service import resolve_media_url
 STATUS_SCHEDULED = "scheduled"
 STATUS_IN_PROGRESS = "in_progress"
 STATUS_COMPLETED = "completed"
+OPENING_DONE_REASON = (
+    "Ya estaba lista al crear la obra: el capítulo llega a medias"
+)
 STATUS_VERIFIED = "verified"
 STATUS_RESCHEDULED = "rescheduled"
 
@@ -1070,6 +1073,15 @@ def _counts_in_zone(task: Task, chapter_id: int, zone_id: int) -> bool:
     return _catalog_template(task) is not None
 
 
+def _is_opening_credit(task: Task) -> bool:
+    """La actividad ya venía lista. El porcentaje del capítulo la representa."""
+    history = list(getattr(task, "status_history", None) or [])
+    return any(
+        (row.reason or "").startswith("Ya estaba lista al crear la obra")
+        for row in history
+    )
+
+
 def _chapter_in_zone(
     tasks: List[Task],
     chapter_id: int,
@@ -1080,6 +1092,8 @@ def _chapter_in_zone(
     matched = [
         task for task in tasks if _counts_in_zone(task, chapter_id, zone_id)
     ]
+    if opening is not None and getattr(opening, "mode", None) == "partial":
+        matched = [task for task in matched if not _is_opening_credit(task)]
     return _blend_opening(_average_progress(matched), opening)
 
 
@@ -1142,6 +1156,7 @@ def house_progress_by_obra(
         db.query(Task)
         .options(
             joinedload(Task.subtasks),
+            joinedload(Task.status_history),
             joinedload(Task.chapter),
             joinedload(Task.budget_activity),
             joinedload(Task.zone),
@@ -1296,6 +1311,7 @@ async def obra_fulfillment(db: Session, obra_id: int) -> Dict[str, Any]:
         db.query(Task)
         .options(
             joinedload(Task.subtasks),
+            joinedload(Task.status_history),
             joinedload(Task.chapter),
             joinedload(Task.budget_activity),
             joinedload(Task.zone),
@@ -1480,8 +1496,9 @@ def seed_obra_with_openings(
     """Programa la obra. Los capítulos marcados no usan el copiado completo.
 
     Completado: sus actividades fijas nacen hechas y el capítulo queda en 100%.
-    A medias: solo se crean las actividades elegidas, y el capítulo arranca
-    en el porcentaje indicado. El resto de capítulos se programa como siempre.
+    A medias: las actividades elegidas nacen hechas y son el porcentaje que
+    se escribe. Las fijas de ese capítulo que no se eligieron se programan
+    y son el resto. Los demás capítulos se programan como siempre.
     No hace commit.
     """
     from app.models import ObraChapterOpening
@@ -1547,21 +1564,35 @@ def seed_obra_with_openings(
         chosen = list(dict.fromkeys(opening.template_ids or []))
         if not chosen:
             raise TaskOpValidationError(
-                "En un capítulo a medias elige al menos una actividad del pool"
+                "En un capítulo a medias elige al menos una actividad que ya esté lista"
             )
+        chosen_ids = set()
         for template_id in chosen:
             template = by_id.get(template_id)
             if template is None or template.chapter_id != chapter_id:
                 raise TaskOpValidationError(
                     "Hay una actividad que no pertenece a ese capítulo o está inactiva"
                 )
+            chosen_ids.add(template.id)
+            task = _spawn_catalog_task(
+                db,
+                obra_id=obra_id,
+                template=template,
+                created_by=created_by,
+                status=STATUS_COMPLETED,
+                reason=OPENING_DONE_REASON,
+            )
+            task.actual_end_date = get_colombia_now().date()
+        for template in fixed_by_chapter.get(chapter_id, []):
+            if template.id in chosen_ids:
+                continue
             _spawn_catalog_task(
                 db,
                 obra_id=obra_id,
                 template=template,
                 created_by=created_by,
                 status=STATUS_SCHEDULED,
-                reason="Elegida al crear la obra porque el capítulo llega a medias",
+                reason="Copiada al crear la obra porque la actividad está marcada como fija",
             )
         db.add(
             ObraChapterOpening(

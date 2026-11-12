@@ -29,6 +29,7 @@ from app.models import (
     TaskTemplateVersion,
     TaskZone,
     WorkerPosition,
+    WorkPlanTask,
 )
 from app.schemas import (
     TaskBudgetActivityCreate,
@@ -597,23 +598,43 @@ def _share_budget_weights(db: Session, budget_activity_id: Optional[int]) -> Non
         row.budget_weight_percent = share if row.is_active == 1 else Decimal("0")
 
 
-def _copy_template_zone_to_obra_tasks(
-    db: Session, template_id: int, zone_id: Optional[int]
-) -> None:
-    """La zona de la actividad general manda en las obras que ya la copiaron."""
+def _copy_template_to_obra_tasks(db: Session, template: TaskTemplate) -> None:
+    """La actividad general manda en las obras que ya la copiaron y en sus bitácoras.
+
+    El vínculo es source_template_id (o la versión de esa plantilla). El nombre y
+    el lugar se copiaron al crear la actividad; aquí se vuelven a alinear.
+    """
     version_ids = [
         row[0]
         for row in db.query(TaskTemplateVersion.id)
-        .filter(TaskTemplateVersion.task_template_id == template_id)
+        .filter(TaskTemplateVersion.task_template_id == template.id)
         .all()
     ]
-    linked = [Task.source_template_id == template_id]
+    linked = [Task.source_template_id == template.id]
     if version_ids:
         linked.append(Task.source_template_version_id.in_(version_ids))
+    tasks = db.query(Task).filter(or_(*linked)).all()
+    if not tasks:
+        return
+    task_ids = []
+    for task in tasks:
+        task.name = template.name
+        task.description = template.description
+        task.chapter_id = template.chapter_id
+        task.budget_activity_id = template.budget_activity_id
+        task.zone_id = template.zone_id
+        task.budget_weight_percent = template.budget_weight_percent
+        task_ids.append(task.id)
     (
-        db.query(Task)
-        .filter(or_(*linked))
-        .update({Task.zone_id: zone_id}, synchronize_session=False)
+        db.query(WorkPlanTask)
+        .filter(WorkPlanTask.task_id.in_(task_ids))
+        .update(
+            {
+                WorkPlanTask.task_name_snapshot: template.name,
+                WorkPlanTask.task_description_snapshot: template.description,
+            },
+            synchronize_session=False,
+        )
     )
 
 
@@ -795,12 +816,11 @@ async def update_template(
             )
     for k, v in payload.items():
         setattr(row, k, v)
-    if "zone_id" in payload:
-        _copy_template_zone_to_obra_tasks(db, row.id, row.zone_id)
     db.flush()
     _share_budget_weights(db, row.budget_activity_id)
     if previous_activity_id != row.budget_activity_id:
         _share_budget_weights(db, previous_activity_id)
+    _copy_template_to_obra_tasks(db, row)
     db.commit()
     return await get_template(db, item_id)
 
