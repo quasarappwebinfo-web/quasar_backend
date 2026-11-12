@@ -76,7 +76,7 @@ El anillo de la bitácora no cambia: sigue siendo el promedio simple de las acti
 
 ## Obra que ya venía empezada
 
-`obra_chapter_openings` marca un capítulo al crear la obra (completado o a medias). El piso es del capítulo, y el capítulo ahora existe dentro de cada zona, así que ese piso aplica en todas las zonas. Lo que se complete después solo sube la zona de la actividad que se completa.
+`obra_chapter_openings` marca un capítulo al crear la obra (completado o a medias, para todas las zonas) y también después, desde la ficha, zona por zona. Completado deja esa zona en 100 % y no admite actividades nuevas ahí. En marcha admite actividades en esa zona; si trae un %, ese es el piso de esa zona. Lo que se complete después solo sube la zona de la actividad que se completa.
 
 ## Dónde está el cálculo de hoy
 

@@ -175,6 +175,28 @@ Selects: `?activeOnly=true`. Paginación estándar (`totalItems`, `itemsPerPage`
 Cambiar `isActive` (dar de baja o reactivar) solo lo acepta el **super admin**; otro usuario recibe `403`. La ficha muestra el botón únicamente a ese rol.  
 **No** cambies etapa aquí (usar `PUT .../etapa`).
 
+### Marcar capítulos de una obra en marcha
+
+`GET /api/v1/obras/{id}/capitulos` lo puede leer quien tenga permiso de obras o de tareas.  
+`PUT /api/v1/obras/{id}/capitulos` solo lo acepta el **super admin**.
+
+```json
+{
+  "chapters": [
+    { "chapterId": 1, "zoneId": 1, "mode": "completed" },
+    { "chapterId": 1, "zoneId": 2, "mode": "running" },
+    { "chapterId": 2, "zoneId": 1, "mode": "open" }
+  ]
+}
+```
+
+La marca es de un capítulo **en una zona**. Estructura puede estar completada en Casa y en marcha en Zona Social.
+
+- `completed`: esa zona queda en 100 %. No se le agregan actividades de ese capítulo en esa zona. Una actividad sin zona entra en todas, así que tampoco se agrega si alguna zona del capítulo está completada. Una actividad que ya existe sí puede entrar a una bitácora.
+- `running`: esa zona sigue admitiendo actividades. `progressPercent` es opcional (1–99) y queda como piso de esa zona.
+- `open`: quita la marca de esa zona.
+- La ficha muestra el botón **Capítulos** solo al super admin. El capítulo desaparece del selector solo cuando está completado en todas las zonas. En la zona, se ocultan las que ya están completadas.
+
 ### Cambiar etapa
 
 `PUT /api/v1/obras/{id}/etapa`

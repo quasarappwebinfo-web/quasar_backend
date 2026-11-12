@@ -9,7 +9,12 @@ class ObraChapterOpening(Base):
 
     __tablename__ = "obra_chapter_openings"
     __table_args__ = (
-        UniqueConstraint("obra_id", "chapter_id", name="uq_obra_chapter_opening"),
+        UniqueConstraint(
+            "obra_id",
+            "chapter_id",
+            "zone_id",
+            name="uq_obra_chapter_zone_opening",
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -22,6 +27,11 @@ class ObraChapterOpening(Base):
         Integer,
         ForeignKey("task_chapters.id", ondelete="NO ACTION", onupdate="NO ACTION"),
         nullable=False,
+    )
+    zone_id = Column(
+        Integer,
+        ForeignKey("task_zones.id", ondelete="NO ACTION", onupdate="NO ACTION"),
+        nullable=True,
     )
     mode = Column(String(20), nullable=False)
     progress_percent = Column(Numeric(5, 2), nullable=False)

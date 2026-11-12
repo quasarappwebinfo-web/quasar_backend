@@ -669,6 +669,10 @@ async def add_task_to_version(
         raise WorkPlanValidationError(
             f"Tarea {data.task_id} no pertenece a la obra del plan"
         )
+    if task.parent_task_id is not None:
+        raise WorkPlanValidationError(
+            f"«{task.name}» es una subtarea. La bitácora incluye la actividad."
+        )
     exists = (
         db.query(WorkPlanTask)
         .filter(
@@ -680,12 +684,21 @@ async def add_task_to_version(
     if exists:
         raise WorkPlanConflictError("La tarea ya está en esta versión")
 
+    open_statuses = {"scheduled", "in_progress", "rescheduled"}
+    if (
+        task.status in open_statuses
+        and data.planned_start_date is None
+        and data.planned_end_date is None
+    ):
+        task.planned_start_date = plan.start_date
+        task.planned_end_date = plan.end_date
+
     snap = _snapshot_from_task(
         db,
         version_id=version_id,
         task=task,
-        planned_start=data.planned_start_date,
-        planned_end=data.planned_end_date,
+        planned_start=data.planned_start_date or task.planned_start_date or plan.start_date,
+        planned_end=data.planned_end_date or task.planned_end_date or plan.end_date,
     )
     db.add(snap)
     _append_event(

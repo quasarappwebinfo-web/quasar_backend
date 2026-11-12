@@ -1,12 +1,21 @@
 """
 Servicio de obras: CRUD, cambio de etapa + historial.
 """
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.permissions import is_super_user
-from app.models import Obra, ObraSaleType, ObraStage, ObraStageHistory
+from app.models import (
+    Obra,
+    ObraChapterOpening,
+    ObraSaleType,
+    ObraStage,
+    ObraStageHistory,
+    TaskChapter,
+    TaskZone,
+)
 from app.schemas import ObraCreate, ObraStageChange, ObraUpdate
 from app.schemas.obras.obra_schema import OBRA_STATUSES
 
@@ -406,3 +415,159 @@ async def delete_obra_cover_image(db: Session, obra_id: int) -> Obra:
 
     delete_object(old_key)
     return _load_obra(db, obra.id)
+
+
+def _opening_mode(opening) -> tuple:
+    if opening is None:
+        return "open", None
+    if opening.mode == "completed":
+        return "completed", 100
+    if opening.mode == "partial":
+        percent = int(opening.progress_percent or 0) or None
+        return "running", percent
+    return "running", None
+
+
+def list_obra_chapter_marks(db: Session, obra_id: int) -> Dict[str, Any]:
+    """Capítulos activos y cómo está cada zona en esta obra."""
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise ObraNotFoundError(f"Obra con ID {obra_id} no encontrada")
+    chapters = (
+        db.query(TaskChapter)
+        .filter(TaskChapter.is_active == 1)
+        .order_by(TaskChapter.display_order.asc(), TaskChapter.name.asc())
+        .all()
+    )
+    zones = (
+        db.query(TaskZone)
+        .filter(TaskZone.is_active == 1)
+        .order_by(TaskZone.display_order.asc(), TaskZone.name.asc())
+        .all()
+    )
+    openings = {
+        (row.chapter_id, row.zone_id): row
+        for row in db.query(ObraChapterOpening)
+        .filter(ObraChapterOpening.obra_id == obra_id)
+        .all()
+    }
+    items = []
+    for chapter in chapters:
+        blanket = openings.get((chapter.id, None))
+        zone_items = []
+        for zone in zones:
+            opening = openings.get((chapter.id, zone.id))
+            if opening is None:
+                opening = blanket
+            mode, percent = _opening_mode(opening)
+            zone_items.append(
+                {
+                    "zone_id": zone.id,
+                    "zone_name": zone.name,
+                    "mode": mode,
+                    "progress_percent": percent,
+                }
+            )
+        items.append(
+            {
+                "chapter_id": chapter.id,
+                "chapter_name": chapter.name,
+                "zones": zone_items,
+            }
+        )
+    return {"chapters": items}
+
+
+def set_obra_chapter_marks(
+    db: Session, obra_id: int, marks, *, actor
+) -> Dict[str, Any]:
+    """El super admin marca cada capítulo en cada zona.
+
+    Completado deja esa zona en 100 % y no admite actividades nuevas ahí.
+    En marcha sigue admitiendo actividades. Si trae un %, ese es el piso de esa zona.
+    Abierto borra la marca de esa zona.
+    """
+    if not is_super_user(actor):
+        raise ObraForbiddenError(
+            "Solo el super admin puede marcar los capítulos de una obra"
+        )
+    obra = db.query(Obra).filter(Obra.id == obra_id).first()
+    if not obra:
+        raise ObraNotFoundError(f"Obra con ID {obra_id} no encontrada")
+    active_chapters = {
+        row.id
+        for row in db.query(TaskChapter).filter(TaskChapter.is_active == 1).all()
+    }
+    active_zones = {
+        row.id
+        for row in db.query(TaskZone).filter(TaskZone.is_active == 1).all()
+    }
+    seen = set()
+    touched_chapters = set()
+    for mark in marks:
+        key = (mark.chapter_id, mark.zone_id)
+        if key in seen:
+            raise ObraValidationError("Una zona del capítulo está repetida")
+        seen.add(key)
+        if mark.chapter_id not in active_chapters:
+            raise ObraValidationError(
+                f"El capítulo {mark.chapter_id} no existe o está inactivo"
+            )
+        if mark.zone_id not in active_zones:
+            raise ObraValidationError(
+                f"La zona {mark.zone_id} no existe o está inactiva"
+            )
+        touched_chapters.add(mark.chapter_id)
+        mode = (mark.mode or "").strip()
+        row = (
+            db.query(ObraChapterOpening)
+            .filter(
+                ObraChapterOpening.obra_id == obra_id,
+                ObraChapterOpening.chapter_id == mark.chapter_id,
+                ObraChapterOpening.zone_id == mark.zone_id,
+            )
+            .first()
+        )
+        if mode == "open":
+            if row is not None:
+                db.delete(row)
+            continue
+        if mode == "completed":
+            stored_mode = "completed"
+            stored_percent = Decimal("100")
+        elif mode == "running":
+            if mark.progress_percent is None:
+                stored_mode = "running"
+                stored_percent = Decimal("0")
+            else:
+                stored_mode = "partial"
+                stored_percent = Decimal(str(mark.progress_percent))
+        else:
+            raise ObraValidationError(
+                "Cada zona se marca abierta, en marcha o completada"
+            )
+        if row is None:
+            db.add(
+                ObraChapterOpening(
+                    obra_id=obra_id,
+                    chapter_id=mark.chapter_id,
+                    zone_id=mark.zone_id,
+                    mode=stored_mode,
+                    progress_percent=stored_percent,
+                )
+            )
+        else:
+            row.mode = stored_mode
+            row.progress_percent = stored_percent
+    if touched_chapters:
+        (
+            db.query(ObraChapterOpening)
+            .filter(
+                ObraChapterOpening.obra_id == obra_id,
+                ObraChapterOpening.chapter_id.in_(touched_chapters),
+                ObraChapterOpening.zone_id.is_(None),
+            )
+            .delete(synchronize_session=False)
+        )
+    db.commit()
+    return list_obra_chapter_marks(db, obra_id)
