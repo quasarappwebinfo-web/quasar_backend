@@ -492,6 +492,7 @@ async def create_plan(
                 raise WorkPlanValidationError(
                     f"«{task.name}» es una subtarea. El periodo incluye la actividad."
                 )
+            _reject_finished_task(task)
             if task.status in open_statuses:
                 task.planned_start_date = data.start_date
                 task.planned_end_date = data.end_date
@@ -642,6 +643,14 @@ async def get_plan_detail(db: Session, plan_id: int) -> Dict[str, Any]:
     return detail
 
 
+def _reject_finished_task(task: Task) -> None:
+    """Una actividad completada o verificada no vuelve a un periodo."""
+    if task.status in ("completed", "verified"):
+        raise WorkPlanValidationError(
+            f"«{task.name}» ya está completada. No se vuelve a programar."
+        )
+
+
 # ---------- Snapshot tasks ----------
 
 
@@ -673,6 +682,7 @@ async def add_task_to_version(
         raise WorkPlanValidationError(
             f"«{task.name}» es una subtarea. La bitácora incluye la actividad."
         )
+    _reject_finished_task(task)
     exists = (
         db.query(WorkPlanTask)
         .filter(
