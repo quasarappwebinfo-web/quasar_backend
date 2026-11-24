@@ -55,6 +55,8 @@ class UnfinishedPlanActivity(BaseSchema):
     planned_end_date: Optional[date] = None
     template_id: Optional[int] = None
     template_code: Optional[str] = None
+    chapter_id: Optional[int] = None
+    budget_activity_id: Optional[int] = None
     chapter_name: Optional[str] = None
     source_plan_id: Optional[int] = None
     source_plan_name: Optional[str] = None
