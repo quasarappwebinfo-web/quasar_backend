@@ -384,7 +384,11 @@ async def list_plans(
 async def list_unfinished_activities(
     db: Session, obra_id: int
 ) -> List[Dict[str, Any]]:
-    """Actividades de periodos anteriores que no se completaron ni verificaron."""
+    """Actividades de la obra que todavía se pueden programar.
+
+    Incluye las que se copiaron al crear la obra y aún no entran en una
+    bitácora, y las de periodos anteriores que no se completaron.
+    """
     obra = db.query(Obra).filter(Obra.id == obra_id).first()
     if not obra:
         raise WorkPlanValidationError(f"Obra {obra_id} no existe")
@@ -392,6 +396,7 @@ async def list_unfinished_activities(
     rows = (
         db.query(Task)
         .options(
+            joinedload(Task.chapter),
             joinedload(Task.source_template),
             joinedload(Task.source_template_version).joinedload(
                 TaskTemplateVersion.task_template
@@ -408,20 +413,22 @@ async def list_unfinished_activities(
         .all()
     )
     items: List[Dict[str, Any]] = []
+    seen = set()
     for task in rows:
+        if task.id in seen:
+            continue
+        seen.add(task.id)
         plans = []
         for snap in task.work_plan_tasks or []:
             version = snap.work_plan_version
             plan = version.work_plan if version else None
             if plan and plan.obra_id == obra_id:
                 plans.append(plan)
-        if not plans:
-            continue
-        latest = max(plans, key=lambda plan: (plan.end_date, plan.id))
+        latest = max(plans, key=lambda plan: (plan.end_date, plan.id)) if plans else None
         template = task.source_template
         if template is None and task.source_template_version:
             template = task.source_template_version.task_template
-        chapter = template.chapter if template else None
+        chapter = task.chapter or (template.chapter if template else None)
         items.append(
             {
                 "id": task.id,
@@ -431,11 +438,14 @@ async def list_unfinished_activities(
                 "planned_end_date": task.planned_end_date,
                 "template_id": template.id if template else task.source_template_id,
                 "template_code": template.code if template else None,
+                "chapter_id": task.chapter_id or (chapter.id if chapter else None),
+                "budget_activity_id": task.budget_activity_id
+                or (template.budget_activity_id if template else None),
                 "chapter_name": chapter.name if chapter else None,
-                "source_plan_id": latest.id,
-                "source_plan_name": latest.name,
-                "source_plan_start_date": latest.start_date,
-                "source_plan_end_date": latest.end_date,
+                "source_plan_id": latest.id if latest else None,
+                "source_plan_name": latest.name if latest else None,
+                "source_plan_start_date": latest.start_date if latest else None,
+                "source_plan_end_date": latest.end_date if latest else None,
             }
         )
     items.sort(
