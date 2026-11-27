@@ -19,6 +19,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    Image as PdfImage,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -39,7 +40,6 @@ from app.models.planificacion.work_plan_task_model import WorkPlanTask
 from app.models.rrhh.obra_daily_attendance_model import ObraDailyAttendance
 from app.models.rrhh.worker_model import Worker
 from app.models import TaskTemplate, TaskTemplateVersion
-from app.services.s3_service import presigned_get_url
 from app.services.task_service import _plain_progress, _task_placement, obra_fulfillment
 
 BLUE = colors.HexColor("#1d4ed8")
@@ -186,17 +186,6 @@ def _clip(value: Optional[str], size: int) -> str:
     if len(text) <= size:
         return text
     return text[: size - 1].rstrip() + "…"
-
-
-def _photo_href(file_url: Optional[str], gallery_url: str) -> str:
-    if not file_url:
-        return gallery_url
-    if file_url.startswith("http"):
-        return file_url
-    try:
-        return presigned_get_url(file_url, expires_in=7 * 24 * 3600)
-    except Exception:
-        return gallery_url
 
 
 def _in_range(moment: Optional[datetime], start: date, end: date) -> bool:
@@ -372,14 +361,19 @@ def _header(canvas, doc, *, obra_name: str, obra_code: Optional[str], range_labe
     eyebrow_text.textOut(eyebrow)
     canvas.drawText(eyebrow_text)
 
+    name_limit = right - (16 * mm + logo_w + 8 * mm)
+    name_size = 16
+    canvas.setFont("Quasar-Bold", name_size)
+    while name_size > 11 and canvas.stringWidth(obra_name, "Quasar-Bold", name_size) > name_limit:
+        name_size -= 0.5
+        canvas.setFont("Quasar-Bold", name_size)
     canvas.setFillColor(INK)
-    canvas.setFont("Quasar-Bold", 11)
-    canvas.drawRightString(right, PAGE_H - 16.4 * mm, _clip(range_label, 48))
+    canvas.drawRightString(right, PAGE_H - 17.6 * mm, obra_name)
 
-    identity = obra_name + (f"   ·   {obra_code}" if obra_code else "")
+    detail = range_label + (f"   ·   {obra_code}" if obra_code else "")
     canvas.setFillColor(MUTED)
     canvas.setFont("Quasar", 8)
-    canvas.drawRightString(right, PAGE_H - 20.6 * mm, _clip(identity, 62))
+    canvas.drawRightString(right, PAGE_H - 22 * mm, _clip(detail, 72))
 
     line_y = PAGE_H - 26.5 * mm
     canvas.setStrokeColor(colors.HexColor("#e3ebf5"))
@@ -582,7 +576,7 @@ def _people(rows) -> List[dict]:
     return people
 
 
-def _photos(db: Session, obra_id: int, task_ids: Sequence[int], start: date, end: date, gallery_url: str):
+def _photos(db: Session, obra_id: int, task_ids: Sequence[int], start: date, end: date):
     counts: Dict[int, int] = {task_id: 0 for task_id in task_ids}
     items = []
     if task_ids:
@@ -608,7 +602,7 @@ def _photos(db: Session, obra_id: int, task_ids: Sequence[int], start: date, end
                     "when": moment,
                     "title": task.parent.name if task and task.parent else (task.name if task else "Actividad"),
                     "caption": photo.description or (task.name if task else "Evidencia de actividad"),
-                    "href": _photo_href(photo.file_url, gallery_url),
+                    "file_url": photo.file_url,
                 }
             )
     obra_photos = db.query(ObraPhoto).filter(ObraPhoto.obra_id == obra_id).all()
@@ -620,7 +614,7 @@ def _photos(db: Session, obra_id: int, task_ids: Sequence[int], start: date, end
                 "when": photo.created_at,
                 "title": "Foto de la obra",
                 "caption": photo.description or "Foto de la obra",
-                "href": _photo_href(photo.file_url, gallery_url),
+                "file_url": photo.file_url,
             }
         )
     items.sort(key=lambda item: item["when"] or datetime.min, reverse=True)
@@ -705,10 +699,9 @@ async def build_informe_pdf(
     tasks = _tasks_for_plans(db, plans)
     attendance = _attendance(db, obra.id, date_from, date_to)
     people = _people(attendance)
-    origin = (public_origin or "").rstrip("/")
-    gallery_url = f"{origin}/dashboard/obras/{obra.id}/galeria" if origin else ""
+    _ = (public_origin, prepared_by)
     photo_counts, photos = _photos(
-        db, obra.id, [task.id for task in tasks], date_from, date_to, gallery_url
+        db, obra.id, [task.id for task in tasks], date_from, date_to
     )
     activities = _activity_rows(tasks, photo_counts)
     fulfillment = await obra_fulfillment(db, obra.id)
@@ -724,7 +717,6 @@ async def build_informe_pdf(
         obra=obra,
         start=date_from,
         end=date_to,
-        prepared_by=prepared_by or "—",
         plan_label=_plan_label(plans),
         people=people,
         attendance=attendance,
@@ -775,13 +767,13 @@ def _render(**data) -> bytes:
         ],
         [
             Paragraph("Bitácora", styles["head"]),
-            Paragraph("Entrega", styles["head"]),
+            Paragraph("", styles["head"]),
             Paragraph("", styles["head"]),
             Paragraph("", styles["head"]),
         ],
         [
             Paragraph(_xml(data["plan_label"]), styles["cell"]),
-            Paragraph(_xml(data["prepared_by"]), styles["cell"]),
+            Paragraph("", styles["cell"]),
             Paragraph("", styles["cell"]),
             Paragraph("", styles["cell"]),
         ],
@@ -795,8 +787,8 @@ def _render(**data) -> bytes:
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 2),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                ("SPAN", (1, 2), (3, 2)),
-                ("SPAN", (1, 3), (3, 3)),
+                ("SPAN", (0, 2), (-1, 2)),
+                ("SPAN", (0, 3), (-1, 3)),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]
         )
@@ -865,7 +857,7 @@ def _render(**data) -> bytes:
         1 for task in data["activities"] if task["status"] in ("completed", "verified")
     )
     photo_total = len(data["photos"])
-    shown_photos = min(4, photo_total)
+    shown_photos = min(8, photo_total)
     photo_tail = (
         f"{photo_total} fotos en el periodo, aquí las {shown_photos} más recientes."
         if photo_total
@@ -1153,40 +1145,109 @@ def _chapter_bars(fulfillment, styles):
     return lines
 
 
-def _photo_strip(photos: Sequence[dict], styles) -> Table:
-    shown = list(photos[:4])
-    if not shown:
-        return Paragraph("No hay fotos en el periodo.", styles["muted"])
-    cells = []
-    for photo in shown:
-        moment = photo["when"]
-        stamp = _short_date(moment.date()) if isinstance(moment, datetime) else "—"
-        href = photo["href"]
-        link = (
-            f'<link href="{escape(href)}">Abrir foto</link>'
-            if href
-            else "Sin enlace"
-        )
-        cells.append(
-            Paragraph(
-                f"<b>{_xml(stamp)}</b><br/>{_xml(_clip(photo['title'], 28))}<br/>"
-                f"{_xml(_clip(photo['caption'], 42))}<br/>{link}",
-                styles["cell"],
-            )
-        )
-    while len(cells) < 4:
-        cells.append(Paragraph("", styles["cell"]))
-    table = Table([cells], colWidths=[44.5 * mm] * 4)
-    table.setStyle(
+def _photo_jpeg(file_url: Optional[str]):
+    key = _storage_key(file_url)
+    if not key:
+        return None
+    try:
+        from app.services.s3_service import get_s3_client
+        from app.config import settings
+
+        obj = get_s3_client().get_object(Bucket=settings.s3_bucket, Key=key)
+        raw = obj["Body"].read()
+    except Exception:
+        return None
+    try:
+        from io import BytesIO
+        from PIL import Image as PilImage
+
+        image = PilImage.open(BytesIO(raw))
+        image = image.convert("RGB")
+        image.thumbnail((1100, 820))
+        out = BytesIO()
+        image.save(out, format="JPEG", quality=82)
+        out.seek(0)
+        width, height = image.size
+        max_w = 86 * mm
+        max_h = 68 * mm
+        scale = min(max_w / width, max_h / height)
+        return PdfImage(out, width=width * scale, height=height * scale)
+    except Exception:
+        return None
+
+
+def _storage_key(file_url: Optional[str]) -> Optional[str]:
+    if not file_url:
+        return None
+    value = file_url.strip()
+    if not value:
+        return None
+    if not value.startswith("http"):
+        return value.lstrip("/")
+    from urllib.parse import urlparse
+
+    path = urlparse(value).path.lstrip("/")
+    bucket = ""
+    try:
+        from app.config import settings
+
+        bucket = (settings.s3_bucket or "").strip("/")
+    except Exception:
+        bucket = ""
+    if bucket and path.startswith(bucket + "/"):
+        path = path[len(bucket) + 1 :]
+    return path or None
+
+
+def _photo_card(photo: dict, styles):
+    moment = photo["when"]
+    stamp = _short_date(moment.date()) if isinstance(moment, datetime) else "—"
+    caption = Paragraph(
+        f"<b>{_xml(stamp)}</b> · {_xml(_clip(photo['title'], 42))}<br/>{_xml(_clip(photo['caption'], 70))}",
+        styles["cell"],
+    )
+    image = _photo_jpeg(photo.get("file_url"))
+    body = [image, Spacer(1, 1.2 * mm), caption] if image else [caption]
+    card = Table([[item] for item in body], colWidths=[86 * mm])
+    card.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), SOFT),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LINEAFTER", (0, 0), (-2, -1), 0.3, LINE),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ]
+        )
+    )
+    return card
+
+
+def _photo_strip(photos: Sequence[dict], styles):
+    shown = list(photos[:8])
+    if not shown:
+        return Paragraph("No hay fotos en el periodo.", styles["muted"])
+    rows = []
+    pair: List[Any] = []
+    for photo in shown:
+        pair.append(_photo_card(photo, styles))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        pair.append(Paragraph("", styles["cell"]))
+        rows.append(pair)
+    table = Table(rows, colWidths=[89 * mm, 89 * mm])
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
             ]
         )
     )
