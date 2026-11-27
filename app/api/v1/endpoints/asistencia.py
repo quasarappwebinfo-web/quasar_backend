@@ -2,13 +2,16 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.core.permissions import PERMISSION_ASISTENCIA
+from app.core.db_timezone import get_colombia_now
+from app.core.permissions import PERMISSION_ASISTENCIA, PERMISSION_OBRAS
 from app.api.deps import get_db, require_permission
 from app.models import User
 from app.schemas.rrhh.asistencia_schema import (
+    AttendancePresenceResponse,
     ObraDailyAttendanceCreate,
     ObraDailyAttendanceResponse,
     TaskDailyAssignmentCreate,
@@ -26,6 +29,8 @@ def _err(e: Exception) -> None:
         raise HTTPException(status_code=409, detail=str(e)) from e
     if isinstance(e, svc.AsistenciaValidationError):
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if isinstance(e, svc.AsistenciaForbiddenError):
+        raise HTTPException(status_code=403, detail=str(e)) from e
     raise e
 
 
@@ -87,6 +92,25 @@ async def check_in(
 
 
 @router.get(
+    "/asistencia/en-sitio",
+    summary="Personas con llegada vigente ese día, en total y por obra",
+)
+async def attendance_presence(
+    work_date: Optional[date] = Query(None, alias="date"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(
+        require_permission(PERMISSION_OBRAS, PERMISSION_ASISTENCIA)
+    ),
+):
+    _ = user_auth
+    result = await svc.attendance_presence(
+        db,
+        work_date=work_date or get_colombia_now().date(),
+    )
+    return AttendancePresenceResponse(**result).model_dump(by_alias=True)
+
+
+@router.get(
     "/asistencia/liquidacion",
     summary="Excel de liquidación: días trabajados, dónde estuvo y valor día × días",
 )
@@ -117,22 +141,30 @@ async def download_liquidacion(
     )
 
 
+class AttendanceRemoveBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 @router.delete(
     "/asistencia/{attendance_id}",
-    status_code=status.HTTP_400_BAD_REQUEST,
-    summary="No permitido: la llegada firmada no se anula",
-    deprecated=True,
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="El super administrador quita una llegada marcada por error",
 )
 async def remove_attendance(
     attendance_id: int,
+    body: AttendanceRemoveBody,
     db: Session = Depends(get_db),
     user_auth: User = Depends(require_permission(PERMISSION_ASISTENCIA)),
 ):
-    _ = attendance_id, db, user_auth
-    raise HTTPException(
-        status_code=400,
-        detail="La llegada firmada no se puede anular. Queda como registro definitivo.",
-    )
+    try:
+        await svc.remove_attendance(
+            db,
+            attendance_id,
+            actor=user_auth,
+            reason=body.reason,
+        )
+    except svc.AsistenciaError as e:
+        _err(e)
 
 # --- gente del día en tarea (mismo router rrhh/operacion vía path operacion) ---
 

@@ -36,6 +36,7 @@ class ObraDailyAttendanceResponse(BaseResponseSchema):
     worker_name: Optional[str] = None
     document_number: Optional[str] = None
     position_name: Optional[str] = None
+    specialty_name: Optional[str] = None
     signed_at: datetime
     signature_type: str
     signature_data: Optional[str] = None
@@ -43,6 +44,17 @@ class ObraDailyAttendanceResponse(BaseResponseSchema):
     recorded_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
     removed_at: Optional[datetime] = None
+
+
+class AttendancePresenceCount(BaseSchema):
+    obra_id: int
+    count: int
+
+
+class AttendancePresenceResponse(BaseSchema):
+    work_date: date
+    total: int
+    counts: list[AttendancePresenceCount]
 
 
 class TaskDailyAssignmentCreate(BaseCreateSchema):

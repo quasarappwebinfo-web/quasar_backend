@@ -95,15 +95,19 @@ def upload_bytes(
         raise S3UploadError(f"Error al subir a S3: {e}") from e
 
 
-def delete_object(key: Optional[str]) -> None:
+def delete_object(key: Optional[str], *, required: bool = False) -> None:
+    """Borra un objeto. Con required=True el fallo no se esconde."""
     if not key:
+        if required:
+            raise S3UploadError("La foto no tiene archivo en S3")
         return
     _, BotoCoreError, ClientError = _boto()
     try:
         client = get_s3_client()
         client.delete_object(Bucket=settings.s3_bucket, Key=key)
-    except (BotoCoreError, ClientError, S3ConfigError):
-        pass
+    except (BotoCoreError, ClientError, S3ConfigError) as exc:
+        if required:
+            raise S3UploadError(f"No se pudo borrar el archivo de S3: {exc}") from exc
 
 
 def public_object_url(key: str) -> str:

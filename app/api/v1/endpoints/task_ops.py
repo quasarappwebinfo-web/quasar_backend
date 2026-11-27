@@ -14,6 +14,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_TAREAS
@@ -75,6 +76,8 @@ def _err(exc: Exception):
         )
     if isinstance(exc, svc.TaskOpValidationError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if isinstance(exc, svc.TaskOpForbiddenError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     raise exc
 
 
@@ -240,6 +243,34 @@ async def photo_gallery(
             ],
             "pagination": result["pagination"],
         }
+    except svc.TaskOpError as e:
+        _err(e)
+
+
+class GalleryPhotoDeleteBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+@router.delete(
+    "/galeria/{kind}/{photo_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="El super administrador elimina una foto de la galería y de S3",
+)
+async def delete_gallery_photo(
+    kind: str,
+    photo_id: int,
+    body: GalleryPhotoDeleteBody,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(require_permission(PERMISSION_TAREAS)),
+):
+    try:
+        await svc.delete_gallery_photo(
+            db,
+            kind=kind,
+            photo_id=photo_id,
+            reason=body.reason,
+            actor=user_auth,
+        )
     except svc.TaskOpError as e:
         _err(e)
 

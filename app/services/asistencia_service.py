@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.db_timezone import get_colombia_now
@@ -39,6 +40,10 @@ class AsistenciaValidationError(AsistenciaError):
     pass
 
 
+class AsistenciaForbiddenError(AsistenciaError):
+    pass
+
+
 def _pagination(total: int, page: int, limit: int = 50) -> Dict[str, Any]:
     return {
         "totalItems": total,
@@ -65,6 +70,7 @@ def _worker_options():
     return [
         joinedload(Worker.person),
         joinedload(Worker.worker_position),
+        joinedload(Worker.specialty),
     ]
 
 
@@ -81,6 +87,7 @@ def attendance_to_dict(row: ObraDailyAttendance) -> Dict[str, Any]:
         "position_name": (
             w.worker_position.name if w and w.worker_position else None
         ),
+        "specialty_name": w.specialty.name if w and w.specialty else None,
         "signed_at": row.signed_at,
         "signature_type": row.signature_type,
         "signature_data": row.signature_data,
@@ -160,6 +167,7 @@ async def list_attendance(
             joinedload(ObraDailyAttendance.obra),
             joinedload(ObraDailyAttendance.worker).joinedload(Worker.person),
             joinedload(ObraDailyAttendance.worker).joinedload(Worker.worker_position),
+            joinedload(ObraDailyAttendance.worker).joinedload(Worker.specialty),
             joinedload(ObraDailyAttendance.recorded_by_user).joinedload(User.person),
         )
         .filter(
@@ -179,6 +187,36 @@ async def list_attendance(
     return {
         "attendance": [attendance_to_dict(r) for r in rows],
         "pagination": _pagination(total, page, limit),
+    }
+
+
+async def attendance_presence(db: Session, *, work_date: date) -> Dict[str, Any]:
+    """Personas con llegada vigente ese día: total distinto y conteo por obra."""
+    active = (
+        ObraDailyAttendance.work_date == work_date,
+        ObraDailyAttendance.removed_at.is_(None),
+    )
+    grouped = (
+        db.query(
+            ObraDailyAttendance.obra_id,
+            func.count(ObraDailyAttendance.id),
+        )
+        .filter(*active)
+        .group_by(ObraDailyAttendance.obra_id)
+        .all()
+    )
+    total = (
+        db.query(func.count(func.distinct(ObraDailyAttendance.worker_id)))
+        .filter(*active)
+        .scalar()
+    )
+    return {
+        "work_date": work_date,
+        "total": int(total or 0),
+        "counts": [
+            {"obra_id": obra_id, "count": int(count)}
+            for obra_id, count in grouped
+        ],
     }
 
 
@@ -277,6 +315,7 @@ async def check_in(
             joinedload(ObraDailyAttendance.obra),
             joinedload(ObraDailyAttendance.worker).joinedload(Worker.person),
             joinedload(ObraDailyAttendance.worker).joinedload(Worker.worker_position),
+            joinedload(ObraDailyAttendance.worker).joinedload(Worker.specialty),
             joinedload(ObraDailyAttendance.recorded_by_user).joinedload(User.person),
         )
         .filter(ObraDailyAttendance.id == row.id)
@@ -285,10 +324,35 @@ async def check_in(
 
 
 async def remove_attendance(
-    db: Session, attendance_id: int, *, removed_by: int
+    db: Session,
+    attendance_id: int,
+    *,
+    actor: User,
+    reason: str,
 ) -> None:
+    """El super administrador corrige una llegada marcada por error.
+
+    No borra la fila: queda quién la quitó y el motivo. Tampoco cuenta en
+    reportes ni impide volver a registrar a esa persona ese día.
+    """
+    from datetime import datetime
+
+    from app.core.permissions import is_super_user
+    from app.models import AuditLog
+
+    if not is_super_user(actor):
+        raise AsistenciaForbiddenError(
+            "Solo el super administrador puede quitar una llegada."
+        )
+    text = (reason or "").strip()
+    if len(text) < 5:
+        raise AsistenciaValidationError("Escribe por qué se quita esta llegada.")
+    if len(text) > 500:
+        raise AsistenciaValidationError("El motivo no puede pasar de 500 caracteres.")
+
     row = (
         db.query(ObraDailyAttendance)
+        .options(joinedload(ObraDailyAttendance.worker).joinedload(Worker.person))
         .filter(ObraDailyAttendance.id == attendance_id)
         .first()
     )
@@ -296,8 +360,23 @@ async def remove_attendance(
         raise AsistenciaNotFoundError(f"Asistencia {attendance_id} no encontrada")
     if row.removed_at is not None:
         raise AsistenciaValidationError("Ya estaba anulada")
-    row.removed_at = get_colombia_now()
-    row.removed_by = removed_by
+    now = get_colombia_now()
+    row.removed_at = now
+    row.removed_by = actor.id
+    person = _person_name(row.worker) or f"Trabajador {row.worker_id}"
+    db.add(
+        AuditLog(
+            entity_type="obra",
+            entity_id=row.obra_id,
+            action="llegada_quitada",
+            field_changed=f"asistencia:{row.id}"[:100],
+            old_value=person[:255],
+            new_value=row.work_date.isoformat(),
+            reason=text,
+            changed_by=actor.id,
+            changed_at=datetime.utcnow(),
+        )
+    )
     # Soft-remove también gente del día en tareas de esa obra
     task_ids = [
         tid
@@ -314,8 +393,8 @@ async def remove_attendance(
             )
             .update(
                 {
-                    TaskDailyAssignment.removed_at: get_colombia_now(),
-                    TaskDailyAssignment.removed_by: removed_by,
+                    TaskDailyAssignment.removed_at: now,
+                    TaskDailyAssignment.removed_by: actor.id,
                 },
                 synchronize_session=False,
             )
