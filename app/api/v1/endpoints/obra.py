@@ -1,7 +1,8 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_OBRAS, PERMISSION_TAREAS
@@ -225,6 +226,51 @@ async def get_obra_endpoint(
         return ObraResponse(**obra_to_dict(obra)).model_dump(by_alias=True)
     except ObraNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{obra_id}/informe", summary="PDF ejecutivo de la obra para un rango")
+async def download_obra_informe(
+    obra_id: int,
+    request: Request,
+    date_from: date = Query(..., alias="dateFrom"),
+    date_to: date = Query(..., alias="dateTo"),
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(
+        require_permission(PERMISSION_OBRAS, PERMISSION_TAREAS)
+    ),
+):
+    from urllib.parse import urlparse
+
+    from app.services.informe_obra_pdf import (
+        InformeNotFoundError,
+        InformeValidationError,
+        build_informe_pdf,
+    )
+
+    origin = request.headers.get("origin") or ""
+    if not origin and request.headers.get("referer"):
+        parsed = urlparse(request.headers["referer"])
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+    prepared = user_auth.person.name if user_auth.person and user_auth.person.name else user_auth.username
+    try:
+        payload, filename = await build_informe_pdf(
+            db,
+            obra_id=obra_id,
+            date_from=date_from,
+            date_to=date_to,
+            prepared_by=prepared,
+            public_origin=origin,
+        )
+    except InformeNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except InformeValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    return Response(
+        content=payload,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{obra_id}/capitulos", summary="Marcas de capítulos de la obra")

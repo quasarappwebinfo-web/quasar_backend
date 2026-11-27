@@ -3,10 +3,15 @@ Endpoints planificación — /api/v1/planificacion/planes
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.core.permissions import PERMISSION_PLANIFICACION
+from app.core.permissions import (
+    PERMISSION_OBRAS,
+    PERMISSION_PLANIFICACION,
+    PERMISSION_TAREAS,
+)
 from app.api.deps import get_db, require_permission
 from app.models import User
 from app.schemas import (
@@ -103,6 +108,51 @@ async def list_unfinished(
         }
     except svc.WorkPlanError as e:
         _err(e)
+
+
+@router.get("/{plan_id}/informe", summary="PDF ejecutivo de una bitácora")
+async def download_plan_informe(
+    plan_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user_auth: User = Depends(
+        require_permission(PERMISSION_PLANIFICACION, PERMISSION_TAREAS, PERMISSION_OBRAS)
+    ),
+):
+    from urllib.parse import urlparse
+
+    from app.services.informe_obra_pdf import (
+        InformeNotFoundError,
+        InformeValidationError,
+        build_informe_pdf,
+    )
+
+    origin = request.headers.get("origin") or ""
+    if not origin and request.headers.get("referer"):
+        parsed = urlparse(request.headers["referer"])
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+    prepared = (
+        user_auth.person.name
+        if user_auth.person and user_auth.person.name
+        else user_auth.username
+    )
+    try:
+        payload, filename = await build_informe_pdf(
+            db,
+            plan_id=plan_id,
+            prepared_by=prepared,
+            public_origin=origin,
+        )
+    except InformeNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except InformeValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    return Response(
+        content=payload,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{plan_id}", summary="Detalle: versiones, snapshots y eventos")

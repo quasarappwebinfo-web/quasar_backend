@@ -18,6 +18,7 @@ from app.models import (
     MeasurementUnit,
     AuditLog,
     Obra,
+    ObraPhoto,
     Task,
     TaskAssignment,
     TaskBudgetActivity,
@@ -102,6 +103,10 @@ class TaskOpConflictError(TaskOpError):
 
 
 class TaskOpValidationError(TaskOpError):
+    pass
+
+
+class TaskOpForbiddenError(TaskOpError):
     pass
 
 
@@ -3083,6 +3088,86 @@ async def delete_photo(db: Session, photo_id: int) -> None:
     db.commit()
     if key:
         delete_object(key)
+
+
+def _gallery_storage_key(file_url: Optional[str]) -> Optional[str]:
+    if not file_url:
+        return None
+    value = file_url.strip()
+    if not value:
+        return None
+    if not value.startswith("http"):
+        return value.lstrip("/")
+    from urllib.parse import urlparse
+
+    path = urlparse(value).path.lstrip("/")
+    return path or None
+
+
+async def delete_gallery_photo(
+    db: Session,
+    *,
+    kind: str,
+    photo_id: int,
+    reason: str,
+    actor: User,
+) -> None:
+    """El super administrador quita una foto de la galería, de S3 y deja constancia."""
+    from app.core.permissions import is_super_user
+    from app.services.s3_service import S3ConfigError, S3UploadError, delete_object
+
+    if not is_super_user(actor):
+        raise TaskOpForbiddenError(
+            "Solo el super administrador puede eliminar fotos de la galería."
+        )
+    text = (reason or "").strip()
+    if len(text) < 5:
+        raise TaskOpValidationError("Escribe por qué se elimina la foto.")
+    if len(text) > 500:
+        raise TaskOpValidationError("El motivo no puede pasar de 500 caracteres.")
+    if kind not in ("task", "obra"):
+        raise TaskOpValidationError("La foto no es de una actividad ni de la obra.")
+
+    if kind == "task":
+        row = (
+            db.query(TaskPhoto)
+            .options(joinedload(TaskPhoto.task))
+            .filter(TaskPhoto.id == photo_id)
+            .first()
+        )
+        if row is None or row.task is None:
+            raise TaskOpNotFoundError(f"Foto {photo_id} no encontrada")
+        obra_id = row.task.obra_id
+        label = (row.description or row.task.name or "Foto de una actividad")[:255]
+    else:
+        row = db.query(ObraPhoto).filter(ObraPhoto.id == photo_id).first()
+        if row is None:
+            raise TaskOpNotFoundError(f"Foto {photo_id} no encontrada")
+        obra_id = row.obra_id
+        label = (row.description or "Foto de la obra")[:255]
+
+    storage_key = _gallery_storage_key(row.file_url)
+    if storage_key:
+        try:
+            delete_object(storage_key, required=True)
+        except (S3ConfigError, S3UploadError) as exc:
+            raise TaskOpValidationError(str(exc)) from exc
+
+    db.add(
+        AuditLog(
+            entity_type="obra",
+            entity_id=obra_id,
+            action="foto_eliminada",
+            field_changed=f"{kind}:{photo_id}"[:100],
+            old_value=label,
+            new_value=(storage_key or "")[:255],
+            reason=text,
+            changed_by=actor.id,
+            changed_at=datetime.utcnow(),
+        )
+    )
+    db.delete(row)
+    db.commit()
 
 
 async def upload_task_document(
